@@ -1,0 +1,23 @@
+NOTICE
+======
+
+bpc-fetch web is a web front end for, and a derivative work of:
+
+  bpc-fetch — https://github.com/Sophomoresty/bpc-fetch
+  MIT License, Copyright (c) 2026 bpc-fetch contributors
+
+Adapted into this project (src/bpc_web/vendor/):
+  * strategy.py — per-site HTTP header strategies (Googlebot/Bingbot UA,
+    Referer spoofing, X-Forwarded-For), payload heuristics.
+  * sites.py   — parser for the Bypass Paywalls Clean `sites.js` table and the
+    domain -> strategy lookup.
+
+The site table (src/bpc_web/data/sites.js) comes from Bypass Paywalls Clean by
+magnolia1234 (https://gitflic.ru/project/magnolia1234/bypass-paywalls-chrome-clean),
+which is licensed GPL-3.0. It is used here as a data file only — a list of
+domains and the request headers that unlock them — and is redistributed
+unmodified.
+
+Everything else (the FastAPI service, the fetch pipeline, the extractor, the
+browser driver, and the React front end) is original work under the MIT license
+in LICENSE.
