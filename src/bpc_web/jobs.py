@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from .browser import BrowserPool
 from .fetcher import FetchError, FetchOptions, FetchResult, fetch_article
+from .store import get_store
 
 MAX_JOBS_KEPT = 300
 CACHE_TTL_SECONDS = 900
@@ -83,6 +84,7 @@ class JobStore:
     # ------------------------------------------------------------------ #
     async def _run(self, job: Job, cache_key: str) -> None:
         job.status = "running"
+        store = get_store()
 
         def progress(stage: str, status: str, label: str) -> None:
             job.steps.append(
@@ -95,7 +97,7 @@ class JobStore:
             )
 
         try:
-            cached = self.cached(cache_key)
+            cached = self.cached(cache_key) or store.find_by_url(job.url, cache_key)
             if cached is not None:
                 progress("cache", "done", "Served from cache")
                 job.result = {**cached, "cached": True}
@@ -109,6 +111,7 @@ class JobStore:
                 )
 
             payload = result.to_dict()
+            payload["article_id"] = store.save(payload, options_key=cache_key)
             self._cache[cache_key] = (time.time(), payload)
             job.result = payload
             job.status = "done"

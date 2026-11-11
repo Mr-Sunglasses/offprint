@@ -40,6 +40,7 @@ export interface StrategyInfo {
 }
 
 export interface FetchResult {
+  article_id?: string
   article: Article
   via: string
   strategy: StrategyInfo
@@ -47,6 +48,7 @@ export interface FetchResult {
   fetched_at: string
   elapsed_ms: number
   confidence: string
+  paywalled_preview?: boolean
   cached?: boolean
 }
 
@@ -95,6 +97,18 @@ export interface FetchOptions {
   skip_browser: boolean
   use_archive: boolean
   include_images: boolean
+  proxy_fallback: boolean
+}
+
+export interface RecentArticle {
+  article_id: string
+  url: string
+  title: string
+  site: string
+  word_count: number
+  via: string
+  fetched_at: string
+  paywalled_preview: boolean
 }
 
 export interface HistoryEntry {

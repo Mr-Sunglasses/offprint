@@ -7,6 +7,7 @@ article, strips the overlay nodes, then reads the rendered DOM.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -37,6 +38,34 @@ PAYWALL_PROVIDERS = (
 )
 
 BLOCKED_RESOURCE_TYPES = {"font", "media"}
+
+# Runs in every frame before page scripts: removes the obvious automation tells.
+# (Cloudflare/DataDome score IP reputation too — this only helps the fingerprint
+# half of the problem, which is why BPC_HEADFUL exists.)
+STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+window.chrome = window.chrome || { runtime: {}, loadTimes: () => {}, csi: () => {} };
+const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+if (originalQuery) {
+  window.navigator.permissions.query = (params) => (
+    params && params.name === 'notifications'
+      ? Promise.resolve({ state: Notification.permission })
+      : originalQuery.call(window.navigator.permissions, params)
+  );
+}
+"""
+
+CHALLENGE_TITLES = (
+    "just a moment",
+    "attention required",
+    "checking your browser",
+    "verifying you are human",
+)
+CHALLENGE_WAIT_MS = int(os.getenv("BPC_CHALLENGE_WAIT_MS", "14000"))
 
 
 @dataclass
@@ -208,8 +237,9 @@ class BrowserPool:
             if self.started:
                 return
             self._pw = await async_playwright().start()
+            headful = os.getenv("BPC_HEADFUL", "0") not in ("0", "false", "no")
             self._browser = await self._pw.chromium.launch(
-                headless=True,
+                headless=not headful,
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--disable-dev-shm-usage",
@@ -246,6 +276,7 @@ class BrowserPool:
                 java_script_enabled=True,
             )
             context.set_default_timeout(BROWSER_TIMEOUT_MS)
+            await context.add_init_script(STEALTH_JS)
             page = await context.new_page()
             try:
                 yield page
@@ -303,6 +334,24 @@ async def fetch_with_browser(
                 "article, [itemprop='articleBody'], .article-body, .story-body, .post-content, main",
                 timeout=8000,
             )
+        except Exception:
+            pass
+
+        # A JS interstitial ("Just a moment…") can clear itself; give it time.
+        try:
+            title = (await page.title()).lower()
+            body_len = await page.evaluate("document.body ? document.body.innerText.length : 0")
+            if any(marker in title for marker in CHALLENGE_TITLES) or body_len < 400:
+                waited = 0
+                while waited < CHALLENGE_WAIT_MS:
+                    await page.wait_for_timeout(2000)
+                    waited += 2000
+                    body_len = await page.evaluate(
+                        "document.body ? document.body.innerText.length : 0"
+                    )
+                    title = (await page.title()).lower()
+                    if body_len > 1500 and not any(m in title for m in CHALLENGE_TITLES):
+                        break
         except Exception:
             pass
 

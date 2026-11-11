@@ -18,6 +18,11 @@ const OPTION_LABELS: Array<{ key: keyof FetchOptions; label: string; hint: strin
   { key: 'force_browser', label: 'Force browser', hint: 'Render with Chromium even if HTTP worked' },
   { key: 'skip_browser', label: 'No browser', hint: 'Fastest: never launch Chromium' },
   { key: 'use_archive', label: 'Wayback', hint: 'Fall back to archive.org snapshots' },
+  {
+    key: 'proxy_fallback',
+    label: 'Proxy fallback',
+    hint: 'Last resort: a text proxy fetches from its own IP (URL is sent to r.jina.ai)',
+  },
   { key: 'include_images', label: 'Images', hint: 'Keep images in the Markdown' },
 ]
 

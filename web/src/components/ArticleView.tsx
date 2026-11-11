@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FetchResult } from '../types'
-import { markdownUrl } from '../api'
+import { articleMarkdownUrl, markdownUrl } from '../api'
 import { hostOf } from '../lib/format'
 import { copyText, renderMarkdown } from '../lib/markdown'
 import { Icon } from './Icon'
 
 interface Props {
   result: FetchResult
-  jobId: string
+  jobId?: string
   onNew: () => void
 }
 
@@ -22,18 +22,55 @@ export function ArticleView({ result, jobId, onNew }: Props) {
   const { article } = result
   const [view, setView] = useState<'reader' | 'raw'>('reader')
   const [copied, setCopied] = useState(false)
+  const [shared, setShared] = useState(false)
+  const proseRef = useRef<HTMLDivElement>(null)
 
   const rendered = useMemo(
     () => (view === 'reader' ? renderMarkdown(article.markdown, article.url) : null),
     [article.markdown, article.url, view],
   )
 
-  const truncated = result.confidence === 'low' || result.via.includes('partial')
+  const downloadHref = result.article_id
+    ? articleMarkdownUrl(result.article_id)
+    : jobId
+      ? markdownUrl(jobId)
+      : undefined
+
+  // If the proxied image fails, retry the publisher's own URL once, then hide it
+  // rather than leaving an empty beige rectangle in the middle of the story.
+  useEffect(() => {
+    const root = proseRef.current
+    if (!root) return
+    const images = Array.from(root.querySelectorAll('img'))
+    const cleanups = images.map((img) => {
+      const handler = () => {
+        const direct = img.getAttribute('data-direct-src')
+        if (direct && img.getAttribute('src') !== direct) {
+          img.setAttribute('src', direct)
+          return
+        }
+        img.classList.add('is-broken')
+      }
+      img.addEventListener('error', handler)
+      return () => img.removeEventListener('error', handler)
+    })
+    return () => cleanups.forEach((fn) => fn())
+  }, [rendered?.html, view])
+
+  const preview =
+    result.paywalled_preview || result.confidence === 'low' || result.via.includes('partial')
 
   async function handleCopy() {
     await copyText(article.markdown)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1800)
+  }
+
+  async function handleShare() {
+    if (!result.article_id) return
+    await copyText(`${window.location.origin}/?a=${result.article_id}`)
+    setShared(true)
+    window.setTimeout(() => setShared(false), 1800)
   }
 
   return (
@@ -55,12 +92,23 @@ export function ArticleView({ result, jobId, onNew }: Props) {
           <span className="byline-time">fetched in {(result.elapsed_ms / 1000).toFixed(1)}s</span>
         </div>
 
-        {truncated && (
+        {preview && (
           <p className="notice notice-warn">
             <Icon name="bolt" size={14} />
-            This one looks truncated — the publisher is metering or hard-gating this article, so
-            what you see may be the preview. Try <strong>Force browser</strong>, or read the
-            original.
+            {result.paywalled_preview ? (
+              <>
+                <span>
+                  <strong>Preview only.</strong> The publisher meters this article, so the text below
+                  is what it serves before the subscription wall. No tool gets the rest without an
+                  account.
+                </span>
+              </>
+            ) : (
+              <>
+                This looks truncated — the publisher is metering or hard-gating this article. Try{' '}
+                <strong>Force browser</strong>, or read the original.
+              </>
+            )}
           </p>
         )}
       </header>
@@ -71,14 +119,22 @@ export function ArticleView({ result, jobId, onNew }: Props) {
             <Icon name={copied ? 'check' : 'copy'} size={15} />
             {copied ? 'Copied' : 'Copy'}
           </button>
-          <a className="tool-btn" href={markdownUrl(jobId)} download>
-            <Icon name="download" size={15} />
-            Download .md
-          </a>
+          {downloadHref && (
+            <a className="tool-btn" href={downloadHref} download>
+              <Icon name="download" size={15} />
+              Download .md
+            </a>
+          )}
           <a className="tool-btn" href={article.url} target="_blank" rel="noreferrer">
             <Icon name="external" size={15} />
             Original
           </a>
+          {result.article_id && (
+            <button className="tool-btn" onClick={handleShare}>
+              <Icon name={shared ? 'check' : 'globe'} size={15} />
+              {shared ? 'Link copied' : 'Share'}
+            </button>
+          )}
         </div>
 
         <div className="toolbar-group">
@@ -107,6 +163,7 @@ export function ArticleView({ result, jobId, onNew }: Props) {
 
       {view === 'reader' ? (
         <div
+          ref={proseRef}
           className={`prose${rendered?.dropCap ? ' has-dropcap' : ''}`}
           dangerouslySetInnerHTML={{ __html: rendered?.html ?? '' }}
         />
@@ -114,6 +171,7 @@ export function ArticleView({ result, jobId, onNew }: Props) {
         <pre className="raw-md">{article.markdown}</pre>
       )}
 
+      {result.attempts.length > 0 && (
       <details className="trace">
         <summary>
           Fetch trace · {result.attempts.length} attempt
@@ -147,6 +205,7 @@ export function ArticleView({ result, jobId, onNew }: Props) {
           </tbody>
         </table>
       </details>
+      )}
     </article>
   )
 }

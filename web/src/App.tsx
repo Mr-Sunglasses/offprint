@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Article, FetchOptions, Health, Job, Lookup } from './types'
-import { health as fetchHealth, lookup as fetchLookup, startFetch, waitForJob } from './api'
+import { getArticle, health as fetchHealth, lookup as fetchLookup, startFetch, waitForJob } from './api'
 import { ArticleView } from './components/ArticleView'
 import { FetchProgress } from './components/FetchProgress'
 import { Header } from './components/Header'
@@ -21,6 +21,7 @@ const DEFAULT_OPTIONS: FetchOptions = {
   skip_browser: false,
   use_archive: true,
   include_images: true,
+  proxy_fallback: true,
 }
 
 function readTheme(): 'light' | 'dark' {
@@ -63,6 +64,38 @@ export default function App() {
     fetchHealth()
       .then(setInfo)
       .catch(() => setInfo(null))
+  }, [])
+
+  // A shared permalink (?a=<article_id>) loads the stored article.
+  useEffect(() => {
+    const shared = new URLSearchParams(window.location.search).get('a')
+    if (!shared) return
+    let cancelled = false
+    getArticle(shared)
+      .then((stored) => {
+        if (cancelled) return
+        setJob({
+          id: '',
+          url: stored.article.url,
+          status: 'done',
+          steps: [],
+          result: stored,
+          error: null,
+          created_at: stored.fetched_at,
+          finished_at: stored.fetched_at,
+        })
+        setUrl(stored.article.url)
+        setPhase('done')
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPhase('error')
+          setError('That shared article is no longer stored on this server.')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const toggleTheme = useCallback(() => {
@@ -135,6 +168,11 @@ export default function App() {
         if (finished.status === 'done' && finished.result) {
           setPhase('done')
           pushHistory(finished.result.article)
+          if (finished.result.article_id) {
+            const next = new URL(window.location.href)
+            next.searchParams.set('a', finished.result.article_id)
+            window.history.replaceState({}, '', next)
+          }
           window.setTimeout(() => {
             document.querySelector('.reader')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
           }, 60)
@@ -156,6 +194,9 @@ export default function App() {
 
   const reset = useCallback(() => {
     abortRef.current?.abort()
+    const next = new URL(window.location.href)
+    next.searchParams.delete('a')
+    window.history.replaceState({}, '', next)
     setPhase('idle')
     setJob(null)
     setError('')
@@ -276,7 +317,7 @@ export default function App() {
                 </div>
               )}
 
-              {result && job && <ArticleView result={result} jobId={job.id} onNew={reset} />}
+              {result && <ArticleView result={result} jobId={job?.id || undefined} onNew={reset} />}
             </section>
           )}
         </main>

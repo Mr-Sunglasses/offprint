@@ -28,7 +28,10 @@ export function renderMarkdown(
 
   template.content.querySelectorAll('img').forEach((img) => {
     const src = img.getAttribute('src') ?? ''
-    if (src) img.setAttribute('src', proxiedImage(src, articleUrl))
+    if (src) {
+      img.setAttribute('data-direct-src', src)
+      img.setAttribute('src', proxiedImage(src, articleUrl))
+    }
     img.setAttribute('loading', 'lazy')
     img.setAttribute('decoding', 'async')
     if (!img.getAttribute('alt')) img.setAttribute('alt', '')

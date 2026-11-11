@@ -1,4 +1,4 @@
-import type { FetchOptions, Health, Job, Lookup, SitesResponse } from './types'
+import type { FetchOptions, FetchResult, Health, Job, Lookup, SitesResponse } from './types'
 
 const BASE = ''
 
@@ -31,6 +31,14 @@ export async function getJob(jobId: string) {
 
 export function markdownUrl(jobId: string) {
   return `/api/fetch/${jobId}/markdown`
+}
+
+export function articleMarkdownUrl(articleId: string) {
+  return `/api/articles/${articleId}/markdown`
+}
+
+export async function getArticle(articleId: string): Promise<FetchResult> {
+  return request<FetchResult>(`/api/articles/${articleId}`)
 }
 
 export async function searchSites(query: string, limit = 60) {

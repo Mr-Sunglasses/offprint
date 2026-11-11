@@ -68,7 +68,11 @@ def test_fetch_rejects_bad_url(client):
 
 
 def test_fetch_job_lifecycle(client, monkeypatch):
+    import uuid
+
     import bpc_web.jobs as jobs_module
+
+    target = f"example.com/{uuid.uuid4().hex[:8]}"
 
     async def fake_fetch_article(url, options=None, pool=None, progress=None):
         if progress:
@@ -78,10 +82,10 @@ def test_fetch_job_lifecycle(client, monkeypatch):
 
     monkeypatch.setattr(jobs_module, "fetch_article", fake_fetch_article)
 
-    created = client.post("/api/fetch", json={"url": "example.com/story"})
+    created = client.post("/api/fetch", json={"url": target})
     assert created.status_code == 202
     job_id = created.json()["job_id"]
-    assert created.json()["url"] == "https://example.com/story"
+    assert created.json()["url"] == f"https://{target}"
 
     for _ in range(50):
         job = client.get(f"/api/fetch/{job_id}").json()
@@ -90,6 +94,13 @@ def test_fetch_job_lifecycle(client, monkeypatch):
     assert job["status"] == "done", job
     assert job["result"]["article"]["title"] == "A Stubbed Story"
     assert any(step["stage"] == "http" for step in job["steps"])
+
+    article_id = job["result"]["article_id"]
+    stored = client.get(f"/api/articles/{article_id}")
+    assert stored.status_code == 200
+    assert stored.json()["article"]["title"] == "A Stubbed Story"
+    assert client.get(f"/api/articles/{article_id}/markdown").status_code == 200
+    assert client.get("/api/articles/nope").status_code == 404
 
     markdown = client.get(f"/api/fetch/{job_id}/markdown")
     assert markdown.status_code == 200

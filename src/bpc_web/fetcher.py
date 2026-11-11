@@ -17,6 +17,7 @@ import httpx
 
 from .browser import BrowserPool, fetch_with_browser
 from .extract import extract_article
+from .proxy import fetch_via_reader_proxy, proxy_enabled, site_name_from_url
 from .vendor.sites import SiteStrategy, get_sites_map, match_strategy
 from .vendor.strategy import (
     TIMEOUT,
@@ -126,6 +127,8 @@ class FetchResult:
     elapsed_ms: int = 0
     confidence: str = "high"
 
+    paywalled_preview: bool = False
+
     def to_dict(self) -> dict:
         return {
             "article": self.article,
@@ -135,6 +138,7 @@ class FetchResult:
             "fetched_at": self.fetched_at,
             "elapsed_ms": self.elapsed_ms,
             "confidence": self.confidence,
+            "paywalled_preview": self.paywalled_preview,
         }
 
 
@@ -144,6 +148,7 @@ class FetchOptions:
     skip_browser: bool = False
     use_archive: bool = True
     include_images: bool = True
+    proxy_fallback: bool = True
 
 
 # --------------------------------------------------------------------------- #
@@ -159,6 +164,25 @@ def _qualifies(article: dict) -> bool:
 
 def _rank(article: dict) -> int:
     return len(article.get("text") or "")
+
+
+HARD_WALL_MARKERS = (
+    "just a moment",
+    "cf-mitigated",
+    "enable js and disable any ad blocker",
+    "checking your browser",
+    "verifying you are human",
+    "captcha-delivery",
+    "datadome",
+)
+
+
+def _is_hard_wall(status: int, html: str) -> bool:
+    """Cloudflare/DataDome answered — no header trick will fix this."""
+    if status in (401, 403, 429) and looks_blocked(html[:4000]):
+        return True
+    head = html[:6000].lower()
+    return any(marker in head for marker in HARD_WALL_MARKERS)
 
 
 # --------------------------------------------------------------------------- #
@@ -210,6 +234,53 @@ async def fetch_article(
     attempts: list[Attempt] = []
     best: dict | None = None
     best_stage = ""
+    hard_wall = False
+    proxy_tried = False
+
+    async def run_proxy() -> None:
+        """Fallback through a text-rendering proxy (fetches from its own IP)."""
+        nonlocal best, best_stage, proxy_tried
+        if proxy_tried or not options.proxy_fallback or not proxy_enabled():
+            return
+        proxy_tried = True
+        await emit("proxy", "running", "Asking a reader proxy to fetch it from its network")
+        t0 = time.perf_counter()
+        try:
+            art = await fetch_via_reader_proxy(url, client=None)
+        except Exception as exc:
+            attempts.append(
+                Attempt(
+                    "proxy",
+                    "Text proxy",
+                    False,
+                    0,
+                    0,
+                    False,
+                    _ms(t0),
+                    f"{type(exc).__name__}: {exc}"[:160],
+                )
+            )
+            await emit("proxy", "failed", "Reader proxy failed")
+            return
+
+        if not art:
+            attempts.append(
+                Attempt("proxy", "Text proxy", False, 0, 0, False, _ms(t0), "no content returned")
+            )
+            await emit("proxy", "failed", "Reader proxy returned nothing")
+            return
+
+        art["site"] = art.get("site") or site_name_from_url(url)
+        if not options.include_images:
+            art["images"] = []
+        chars = len(art["text"])
+        attempts.append(
+            Attempt(
+                "proxy", "Text proxy", True, 200, chars, False, _ms(t0), "rendered by r.jina.ai"
+            )
+        )
+        await emit("proxy", "done", f"{chars:,} chars via reader proxy")
+        take(art, "Reader proxy")
 
     def consider(html: str, dom: dict | None = None) -> dict:
         art = extract_article(html, url, dom=dom)
@@ -265,6 +336,7 @@ async def fetch_article(
                 )
             )
             await emit("http", "done", f"HTTP {resp.status_code} · {len(art['text']):,} chars")
+            hard_wall = _is_hard_wall(resp.status_code, resp.text)
             if blocked:
                 pass  # a bot guard answered: this is not the article
             elif paywalled:
@@ -297,6 +369,7 @@ async def fetch_article(
                 )
             )
             await emit("bot", "done", f"HTTP {resp.status_code} · {len(art['text']):,} chars")
+            hard_wall = hard_wall or _is_hard_wall(resp.status_code, resp.text)
             if blocked:
                 pass
             elif paywalled:
@@ -319,6 +392,16 @@ async def fetch_article(
                 )
             )
             await emit("bot", "failed", "Crawler retry failed")
+
+        # A Cloudflare/DataDome wall won't fall to a local browser: the wall is
+        # scoring our IP, so try the proxy first and save 20 seconds.
+        if hard_wall and best is None:
+            await run_proxy()
+            # Behind a Cloudflare/DataDome wall a local browser can't win, and a
+            # preview is all a subscription site will ever hand over — stop here
+            # instead of burning another 25 seconds to prove it.
+            if best is not None and (_rank(best) >= GOOD_ENOUGH_CHARS or hard_wall):
+                return _finish(best, best_stage, strategy_info, attempts, started)
 
         # --- 3. headless browser ------------------------------------------ #
         if not options.skip_browser:
@@ -368,6 +451,13 @@ async def fetch_article(
                     )
                 )
                 await emit("browser", "failed", "Browser render failed")
+
+        if best is None or _rank(best) < GOOD_ENOUGH_CHARS:
+            await run_proxy()
+            if best is not None and (
+                _rank(best) >= GOOD_ENOUGH_CHARS or best.get("paywalled_preview")
+            ):
+                return _finish(best, best_stage, strategy_info, attempts, started)
 
         # --- 4. Wayback Machine ------------------------------------------- #
         if options.use_archive and (best is None or _rank(best) < GOOD_ENOUGH_CHARS):
@@ -432,11 +522,14 @@ def _finish(article, via, strategy_info, attempts, started) -> FetchResult:
     if article and not article.get("images"):
         article["images"] = re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", article.get("markdown", ""))
     words = article.get("word_count", 0)
+    preview = bool(article.get("paywalled_preview")) or looks_paywalled(article.get("markdown", ""))
     confidence = (
         "high"
         if words >= 250 and via in ("Direct request", "Crawler User-Agent")
         else ("medium" if words >= 250 else "low")
     )
+    if preview:
+        confidence = "low"
     return FetchResult(
         article=article,
         via=via,
@@ -445,6 +538,7 @@ def _finish(article, via, strategy_info, attempts, started) -> FetchResult:
         fetched_at=datetime.now(UTC).isoformat(timespec="seconds"),
         elapsed_ms=_ms(started),
         confidence=confidence,
+        paywalled_preview=preview,
     )
 
 

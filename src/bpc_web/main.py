@@ -22,6 +22,7 @@ from . import __version__
 from .browser import BrowserPool
 from .fetcher import FetchOptions, normalise_url
 from .jobs import JobStore, RateLimiter
+from .store import get_store
 from .vendor.sites import get_sites_map, match_strategy
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -70,6 +71,7 @@ class FetchRequest(BaseModel):
     skip_browser: bool = False
     use_archive: bool = True
     include_images: bool = True
+    proxy_fallback: bool = True
 
 
 # --------------------------------------------------------------------------- #
@@ -132,6 +134,7 @@ async def health() -> dict:
         "version": __version__,
         "sites_supported": len(sites),
         "playwright_ready": _playwright_ready(),
+        "articles_stored": get_store().count(),
         "uptime_seconds": int(time.time() - STARTED_AT),
     }
 
@@ -149,8 +152,12 @@ async def create_fetch(request: Request, body: FetchRequest) -> dict:
         skip_browser=body.skip_browser,
         use_archive=body.use_archive,
         include_images=body.include_images,
+        proxy_fallback=body.proxy_fallback,
     )
-    cache_key = f"{url}|{int(body.force_browser)}{int(body.skip_browser)}{int(body.use_archive)}{int(body.include_images)}"
+    cache_key = (
+        f"{url}|{int(body.force_browser)}{int(body.skip_browser)}"
+        f"{int(body.use_archive)}{int(body.include_images)}{int(body.proxy_fallback)}"
+    )
     job = request.app.state.jobs.submit(url, options, cache_key)
     return {"job_id": job.id, "url": url, "status": job.status}
 
@@ -245,6 +252,33 @@ async def lookup(url: str = Query(min_length=3, max_length=2048)) -> dict:
         "bypass_type": strategy.bypass_type(),
         "needs_browser": strategy.needs_browser(),
     }
+
+
+@app.get("/api/articles/{article_id}")
+async def get_article(article_id: str) -> dict:
+    payload = get_store().get(article_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Unknown article id.")
+    return payload
+
+
+@app.get("/api/articles/{article_id}/markdown")
+async def download_stored_markdown(article_id: str) -> Response:
+    payload = get_store().get(article_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Unknown article id.")
+    article = payload["article"]
+    filename = f"{_slugify(article.get('title') or '')}.md"
+    return Response(
+        content=_frontmatter(article) + article["markdown"] + "\n",
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/recent")
+async def recent_articles(limit: int = Query(12, ge=1, le=60)) -> dict:
+    return {"articles": get_store().recent(limit)}
 
 
 # --------------------------------------------------------------------------- #

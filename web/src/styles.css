@@ -978,6 +978,11 @@ pre {
   text-decoration-thickness: 2px;
 }
 
+.prose img.is-broken,
+.prose figure:has(img.is-broken) {
+  display: none;
+}
+
 .prose img {
   max-width: 100%;
   height: auto;

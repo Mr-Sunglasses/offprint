@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from .vendor.strategy import PAYWALL_MARKERS
+from .vendor.strategy import PAYWALL_MARKERS, looks_paywalled
 
 MIN_ARTICLE_CHARS = 220
 
@@ -59,7 +59,12 @@ _BOILERPLATE_PARA = re.compile(
     r"this (is|was) your (last|final) free article|"
     r"to continue reading,? (create|register|subscribe)|"
     r"already have an account\?|"
-    r"^sign up (for|to)|^get unlimited access)",
+    r"^sign up (for|to)|^get unlimited access|"
+    r"continue with a free trial|get full access|subscribe for full access|"
+    r"already (a )?subscribed|"
+    r"^share$|^listen to this article$|^save$|^print$|^menu$|^skip to (content|navigation)$|"
+    r"^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2}(st|nd|rd|th)?,? \d{4}\s*\|?\s*\d+ min read$|"
+    r"^\d+ min read$)",
     re.IGNORECASE,
 )
 
@@ -124,10 +129,18 @@ def _drop_nav_noise(markdown: str) -> str:
         plain = re.sub(r"^[#>\-\*\s]+", "", block).strip()
         return not (len(plain) >= 45 or re.search(r"[.!?…]\s*$", plain))
 
-    chrome = sum(1 for b in blocks if is_chrome(b))
+    def is_link_row(block: str) -> bool:
+        """Breadcrumbs and tag rows: short, and almost entirely link markup."""
+        stripped = block.strip()
+        if len(stripped) > 140 or stripped.startswith(("#", "-", "*", "1.")):
+            return False
+        linked = sum(len(m.group(0)) for m in re.finditer(r"\[[^\]]*\]\([^)]*\)", stripped))
+        return linked > 0 and linked / max(len(stripped), 1) > 0.55
+
+    chrome = sum(1 for b in blocks if is_chrome(b) or is_link_row(b))
     if chrome / len(blocks) < 0.3:
         return markdown
-    return "\n\n".join(b for b in blocks if not is_chrome(b))
+    return "\n\n".join(b for b in blocks if not (is_chrome(b) or is_link_row(b)))
 
 
 def _drop_boilerplate_paragraphs(markdown: str) -> str:
@@ -176,8 +189,15 @@ def _absolutise_images(markdown: str, base_url: str) -> str:
     return re.sub(r"!\[([^\]]*)\]\(([^)\s]+)\)", repl, markdown)
 
 
+_DROP_CAP_SPLIT = re.compile(r"(?m)^([B-HJ-Z]) (?=[a-z]{2,})")
+
+
 def _tidy_markdown(markdown: str) -> str:
     md = markdown.replace("\r\n", "\n")
+    # Some publishers wrap the first letter of a paragraph in a drop-cap span;
+    # extraction leaves "J ensen Huang". Only single non-word letters, so
+    # legitimate "A man" / "I think" openings survive.
+    md = _DROP_CAP_SPLIT.sub(r"\1", md)
     md = re.sub(r"[ \t]+\n", "\n", md)
     md = re.sub(r"\n{3,}", "\n\n", md)
     md = re.sub(r"^\s*Advertisement\s*$", "", md, flags=re.MULTILINE | re.IGNORECASE)
@@ -374,6 +394,23 @@ def _best_block_text(html: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Markdown cleanup chain (shared with the reader-proxy path)
+# --------------------------------------------------------------------------- #
+
+
+def finalise_markdown(markdown: str, url: str) -> str:
+    """Run the full cleanup chain.
+
+    Order matters: the subscription CTA marks the end of the article, and
+    everything the publisher dumps after it (related stories, newsletter plugs,
+    footers) has to go with it. Then the paragraph-level filters mop up.
+    """
+    md = strip_paywall_text(_absolutise_images(markdown, url))
+    md = _dedupe_blocks(_drop_nav_noise(_drop_boilerplate_paragraphs(md)))
+    return _tidy_markdown(md)
+
+
+# --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
 
@@ -418,9 +455,8 @@ def extract_article(html: str, url: str, dom: dict | None = None) -> dict:
         if inline_body and len(inline_body) > len(markdown) * 1.15:
             markdown = inline_body
 
-    markdown = _dedupe_blocks(_drop_nav_noise(_drop_boilerplate_paragraphs(markdown)))
-    markdown = strip_paywall_text(_absolutise_images(markdown, url))
-    markdown = _tidy_markdown(markdown)
+    paywalled_preview = looks_paywalled(markdown)
+    markdown = finalise_markdown(markdown, url)
 
     words = len(re.findall(r"\b[\w'’-]+\b", markdown))
     plain = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", markdown)
@@ -438,6 +474,7 @@ def extract_article(html: str, url: str, dom: dict | None = None) -> dict:
         "reading_minutes": max(1, round(words / 220)),
         "excerpt": " ".join(plain.split())[:280],
         "images": re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", markdown),
+        "paywalled_preview": paywalled_preview,
     }
 
 

@@ -100,6 +100,11 @@ PAYWALL_MARKERS = (
     "subscribe to keep reading",
     "to continue reading this article",
     "start your free trial",
+    "continue with a free trial",
+    "get full access",
+    "subscribe for full access",
+    "already subscribed?",
+    "this article is free to read",
 )
 
 # Markers that mean "a bot guard answered the request, not the site".

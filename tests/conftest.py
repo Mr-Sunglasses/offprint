@@ -1,4 +1,16 @@
-"""Shared fixtures."""
+"""Shared fixtures.
+
+Tests must never touch the real article database in ~/.cache, so the store is
+pointed at a throwaway file before the app (and its lazy store singleton) loads.
+"""
+
+import os
+import tempfile
+
+os.environ.setdefault(
+    "BPC_DB_PATH", os.path.join(tempfile.mkdtemp(prefix="bpc-test-"), "articles.db")
+)
+os.environ.setdefault("BPC_DISABLE_RATE_LIMIT", "1")
 
 import pytest
 from fastapi.testclient import TestClient
