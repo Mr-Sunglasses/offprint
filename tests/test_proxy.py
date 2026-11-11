@@ -69,8 +69,11 @@ def test_prose_window_keeps_the_story_only():
     assert "Sign in" not in window
 
 
+ECONOMIST_URL = "https://www.economist.com/leaders/2026/11/11/jensen-huang-must-resign"
+
+
 def test_article_from_payload_flags_preview():
-    article = article_from_reader_payload(PAYLOAD, "https://www.economist.com/x", windowed=True)
+    article = article_from_reader_payload(PAYLOAD, ECONOMIST_URL, windowed=True)
     assert article is not None
     assert article["title"] == "Jensen Huang must resign"
     assert article["paywalled_preview"] is True
@@ -79,6 +82,21 @@ def test_article_from_payload_flags_preview():
     assert "free trial" not in article["markdown"].lower()
     assert "some other story" not in article["markdown"].lower()
     assert article["word_count"] > 0
+
+
+def test_payload_for_another_url_is_rejected():
+    # Guards against a proxy cache handing back the wrong article.
+    assert (
+        article_from_reader_payload(
+            PAYLOAD, "https://www.economist.com/somewhere/else", windowed=True
+        )
+        is None
+    )
+
+
+def test_error_payload_is_rejected():
+    error = '{"data":null,"code":422,"name":"AssertionFailureError","status":42206,"message":"No content"}'
+    assert article_from_reader_payload(error, ECONOMIST_URL, windowed=False) is None
 
 
 def test_article_from_payload_rejects_empty():

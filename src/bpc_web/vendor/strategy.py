@@ -85,13 +85,29 @@ PAYWALL_MARKERS = (
     "this article is for subscribers",
     "to read the full story",
     "register for free to continue",
-    "already a subscriber? sign in",
-    "unlock this article",
     "this content is for subscribers",
     "continue reading with a subscription",
     "you've reached your article limit",
     "you have reached your article limit",
     "become a subscriber to continue",
+)
+
+# Broader signals that only make sense on *extracted article text* — half the web
+# has "Already have an account?" in a login box, so these must never be matched
+# against raw HTML.
+METERED_CTA_MARKERS = (
+    *PAYWALL_MARKERS,
+    "already have an account",
+    "already a subscriber",
+    "already subscribed",
+    "unlock this article",
+    "unlock just this article",
+    "create account to unlock",
+    "continue with a free trial",
+    "start your free trial",
+    "continue reading with a free account",
+    "get full access",
+    "subscribe for full access",
     "used all of your gift articles",
     "used all of your free articles",
     "reached your limit of free articles",
@@ -99,11 +115,6 @@ PAYWALL_MARKERS = (
     "free articles remaining",
     "subscribe to keep reading",
     "to continue reading this article",
-    "start your free trial",
-    "continue with a free trial",
-    "get full access",
-    "subscribe for full access",
-    "already subscribed?",
     "this article is free to read",
 )
 
@@ -128,8 +139,18 @@ BOT_BLOCK_MARKERS = (
 
 
 def looks_paywalled(html: str) -> bool:
+    """Does raw HTML advertise a subscription gate? (Specific phrases only.)"""
     lower = html.lower()
     return any(m in lower for m in PAYWALL_MARKERS)
+
+
+def looks_metered(text: str) -> bool:
+    """Does extracted article text carry a subscription CTA?
+
+    Used on Markdown/text after extraction, where broad markers are meaningful.
+    """
+    lower = text.lower()
+    return any(m in lower for m in METERED_CTA_MARKERS)
 
 
 def looks_blocked(html_or_text: str) -> bool:

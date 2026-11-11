@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from .vendor.strategy import PAYWALL_MARKERS, looks_paywalled
+from .vendor.strategy import METERED_CTA_MARKERS, looks_metered
 
 MIN_ARTICLE_CHARS = 220
 
@@ -162,7 +162,7 @@ def strip_paywall_text(text: str) -> str:
         return ""
     lower = text.lower()
     cut = len(text)
-    for marker in PAYWALL_MARKERS:
+    for marker in METERED_CTA_MARKERS:
         idx = lower.find(marker)
         if idx > 120:  # ignore matches in the first sentence (legit prose)
             cut = min(cut, idx)
@@ -455,7 +455,7 @@ def extract_article(html: str, url: str, dom: dict | None = None) -> dict:
         if inline_body and len(inline_body) > len(markdown) * 1.15:
             markdown = inline_body
 
-    paywalled_preview = looks_paywalled(markdown)
+    paywalled_preview = looks_metered(markdown)
     markdown = finalise_markdown(markdown, url)
 
     words = len(re.findall(r"\b[\w'’-]+\b", markdown))

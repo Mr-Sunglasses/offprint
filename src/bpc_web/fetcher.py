@@ -25,6 +25,7 @@ from .vendor.strategy import (
     build_headers,
     googlebot_headers,
     looks_blocked,
+    looks_metered,
     looks_paywalled,
 )
 
@@ -522,7 +523,7 @@ def _finish(article, via, strategy_info, attempts, started) -> FetchResult:
     if article and not article.get("images"):
         article["images"] = re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", article.get("markdown", ""))
     words = article.get("word_count", 0)
-    preview = bool(article.get("paywalled_preview")) or looks_paywalled(article.get("markdown", ""))
+    preview = bool(article.get("paywalled_preview")) or looks_metered(article.get("markdown", ""))
     confidence = (
         "high"
         if words >= 250 and via in ("Direct request", "Crawler User-Agent")

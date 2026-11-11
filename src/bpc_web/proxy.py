@@ -14,11 +14,12 @@ from __future__ import annotations
 
 import os
 import re
+from urllib.parse import urlparse
 
 import httpx
 
 from .extract import finalise_markdown
-from .vendor.strategy import looks_paywalled
+from .vendor.strategy import looks_metered
 
 PROXY_BASE = os.getenv("BPC_READER_PROXY_URL", "https://r.jina.ai/")
 PROXY_TIMEOUT = float(os.getenv("BPC_READER_PROXY_TIMEOUT", "45"))
@@ -86,13 +87,28 @@ def prose_window(markdown: str) -> str:
     return "\n\n".join(blocks[start : end + 1])
 
 
+_ERROR_BODY = re.compile(r'^\s*\{\s*"data"\s*:\s*null.{0,400}?"code"', re.DOTALL)
+
+
 def article_from_reader_payload(text: str, url: str, *, windowed: bool) -> dict | None:
     """Turn a Jina response into an article dict, or None if nothing usable."""
+    if _ERROR_BODY.match(text):
+        return None
+
     meta, body = parse_reader_payload(text)
+
+    # The proxy caches by URL; if it hands back a different page, drop it rather
+    # than showing one article's body under another article's link.
+    source = meta.get("url") or ""
+    if source:
+        requested_path = urlparse(url).path.rstrip("/")
+        source_path = urlparse(source).path.rstrip("/")
+        if requested_path and source_path and requested_path != source_path:
+            return None
     if windowed:
         body = prose_window(body)
 
-    preview = looks_paywalled(body)
+    preview = looks_metered(body)
     markdown = finalise_markdown(body, url)
     if len(markdown) < 200:
         return None
