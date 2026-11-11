@@ -373,12 +373,19 @@ async def fetch_article(
         if options.use_archive and (best is None or _rank(best) < GOOD_ENOUGH_CHARS):
             await emit("archive", "running", "Consulting the Wayback Machine")
             t0 = time.perf_counter()
-            try:
-                resp = await client.get(
-                    f"https://web.archive.org/web/2id_/{url}",
-                    headers={"User-Agent": UA_NORMAL},
-                    timeout=25.0,
-                )
+            archive_note = ""
+            for snapshot in await _archive_candidates(client, url):
+                try:
+                    resp = await client.get(
+                        snapshot, headers={"User-Agent": UA_NORMAL}, timeout=25.0
+                    )
+                except Exception as exc:
+                    archive_note = f"{type(exc).__name__}: {exc}"[:160]
+                    continue
+                if resp.status_code == 429:
+                    archive_note = "rate limited"
+                    await asyncio.sleep(1.2)
+                    continue
                 art = consider(resp.text)
                 chars = len(art["text"])
                 ok = resp.status_code == 200 and chars > 0
@@ -391,27 +398,22 @@ async def fetch_article(
                         chars,
                         False,
                         _ms(t0),
-                        ""
-                        if ok
-                        else ("rate limited" if resp.status_code == 429 else "no snapshot"),
+                        "" if ok else "no snapshot",
                     )
                 )
-                await emit("archive", "done" if ok else "failed", f"{chars:,} chars from archive")
+                archive_note = "" if ok else "no snapshot"
                 if ok:
                     take(art, "Wayback Machine")
-            except Exception as exc:
-                attempts.append(
-                    Attempt(
-                        "archive",
-                        "Wayback Machine",
-                        False,
-                        0,
-                        0,
-                        False,
-                        _ms(t0),
-                        f"{type(exc).__name__}: {exc}"[:160],
+                    await emit("archive", "done", f"{chars:,} chars from archive")
+                    break
+
+            if not any(a.stage == "archive" and a.ok for a in attempts):
+                if not any(a.stage == "archive" for a in attempts):
+                    attempts.append(
+                        Attempt(
+                            "archive", "Wayback Machine", False, 0, 0, False, _ms(t0), archive_note
+                        )
                     )
-                )
                 await emit("archive", "failed", "Archive lookup failed")
 
     if best is None:
@@ -448,6 +450,32 @@ def _finish(article, via, strategy_info, attempts, started) -> FetchResult:
 
 def _ms(t0: float) -> int:
     return int((time.perf_counter() - t0) * 1000)
+
+
+async def _archive_candidates(client: httpx.AsyncClient, url: str) -> list[str]:
+    """Snapshot URLs to try, newest first.
+
+    The bare /web/2id_/ path redirects to the latest capture, but it answers
+    429 under load; the availability API usually still works and gives us a
+    timestamp to pin.
+    """
+    candidates: list[str] = []
+    try:
+        resp = await client.get(
+            "https://archive.org/wayback/available",
+            params={"url": url},
+            headers={"User-Agent": UA_NORMAL},
+            timeout=15.0,
+        )
+        if resp.status_code == 200:
+            closest = (resp.json().get("archived_snapshots") or {}).get("closest") or {}
+            timestamp = closest.get("timestamp")
+            if timestamp and closest.get("available"):
+                candidates.append(f"https://web.archive.org/web/{timestamp}id_/{url}")
+    except Exception:
+        pass
+    candidates.append(f"https://web.archive.org/web/2id_/{url}")
+    return candidates
 
 
 async def _one_off_browser(url: str, strategy: SiteStrategy | None):
