@@ -359,6 +359,7 @@ class ArticleStore:
             "attempts": json.loads(row["attempts"] or "[]"),
             "confidence": row["confidence"],
             "paywalled_preview": bool(row["preview"]),
+            "used_session": False,  # stored rows predate session tracking
             "fetched_at": row["fetched_at"],
             "elapsed_ms": row["elapsed_ms"],
         }
