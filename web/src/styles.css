@@ -1847,7 +1847,10 @@ pre {
 }
 
 .discover-check {
+  width: 1rem;
+  height: 1rem;
   accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .discover-item-main {

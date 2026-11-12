@@ -26,6 +26,20 @@ services:
     shm_size: "1gb"
     environment:
       BPC_CDP_PORT: "9222"
+    # The image's healthcheck probes the app's :8000, which this container never
+    # serves — override it with a real check of the CDP proxy.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket,sys; s=socket.socket(); s.settimeout(3); sys.exit(0 if s.connect_ex(('127.0.0.1',9222))==0 else 1)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
 
 volumes:

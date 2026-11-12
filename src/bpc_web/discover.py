@@ -142,7 +142,7 @@ def parse_feed(xml: bytes, base_url: str) -> list[dict]:
 
         articles.append(
             {
-                "title": title or link,
+                "title": _strip_html(title) or link,
                 "url": urljoin(base_url, link),
                 "published": (
                     dt.isoformat(timespec="seconds") if (dt := _parse_when(published)) else ""

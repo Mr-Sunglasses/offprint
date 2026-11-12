@@ -137,9 +137,9 @@ export function DiscoverPanel({ onFetchUrl, onFetchMany, initialSite }: Props) {
                   <button className="discover-title" onClick={() => onFetchUrl(article.url)}>
                     {article.title}
                   </button>
-                  <span className="discover-meta">
+                  <span className="discover-meta" title={article.summary || undefined}>
                     {article.published || 'undated'}
-                    {article.summary ? ` · ${article.summary.slice(0, 110)}` : ''}
+                    {article.summary ? ` · ${article.summary}` : ''}
                   </span>
                 </div>
                 <button className="batch-item-action" onClick={() => onFetchUrl(article.url)} title="Fetch this article">
