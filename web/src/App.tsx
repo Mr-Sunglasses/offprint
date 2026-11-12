@@ -27,6 +27,7 @@ const DEFAULT_OPTIONS: FetchOptions = {
   use_archive: true,
   include_images: true,
   proxy_fallback: true,
+  use_session: true,
 }
 
 const MODES: Array<{ key: Mode; label: string }> = [

@@ -9,6 +9,7 @@ import type {
   Lookup,
   SearchHit,
   SitesResponse,
+  StoredSession,
 } from './types'
 
 const BASE = ''
@@ -135,4 +136,25 @@ export function epubUrl(articleId: string) {
 
 export function pdfUrl(articleId: string) {
   return `/api/articles/${articleId}/pdf`
+}
+
+export async function listSessions() {
+  return request<{ sessions: StoredSession[] }>('/api/sessions')
+}
+
+export async function addSession(domain: string, cookie: string) {
+  return request<{ domain: string; cookies: number; updated_at: number }>(
+    `/api/sessions/${encodeURIComponent(domain)}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cookie }),
+    },
+  )
+}
+
+export async function removeSession(domain: string) {
+  return request<{ removed: boolean }>(`/api/sessions/${encodeURIComponent(domain)}`, {
+    method: 'DELETE',
+  })
 }

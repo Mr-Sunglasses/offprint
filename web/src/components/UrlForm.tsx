@@ -23,6 +23,11 @@ const OPTION_LABELS: Array<{ key: keyof FetchOptions; label: string; hint: strin
     label: 'Proxy fallback',
     hint: 'Last resort: a text proxy fetches from its own IP (URL is sent to r.jina.ai)',
   },
+  {
+    key: 'use_session',
+    label: 'My session',
+    hint: 'Use your stored publisher cookies for sites you subscribe to',
+  },
   { key: 'include_images', label: 'Images', hint: 'Keep images in the Markdown' },
 ]
 
@@ -120,7 +125,13 @@ export function UrlForm({
 
       <div className="fetch-meta">
         <div className="fetch-meta-left">
-          {lookup?.supported ? (
+          {lookup?.session ? (
+            <span className="badge badge-session">
+              <Icon name="book" size={12} />
+              {lookup.name || lookup.domain}
+              <em>your session</em>
+            </span>
+          ) : lookup?.supported ? (
             <span className={`badge badge-${lookup.bypass_type.split(':')[0]}`}>
               <Icon name="bolt" size={12} />
               {lookup.name || lookup.domain}

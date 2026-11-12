@@ -79,6 +79,11 @@ export function ArticleView({ result, jobId, onNew }: Props) {
         <div className="reader-eyebrow">
           <span className="eyebrow-site">{article.site || hostOf(article.url)}</span>
           <span className="eyebrow-chip subtle">{result.via.replace(' (partial)', '')}</span>
+          {result.used_session && (
+            <span className="eyebrow-chip subtle" title="Rendered with your stored cookies">
+              your session
+            </span>
+          )}
           {result.cached && <span className="eyebrow-chip subtle">cached</span>}
         </div>
 

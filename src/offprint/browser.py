@@ -272,11 +272,12 @@ class BrowserPool:
                 self._pw = None
 
     @asynccontextmanager
-    async def page(self, user_agent: str = UA_NORMAL):
+    async def page(self, user_agent: str = UA_NORMAL, storage_state: dict | None = None):
         await self.start()
         async with self._sem:
             assert self._browser is not None
             context = await self._browser.new_context(
+                storage_state=storage_state,
                 user_agent=user_agent,
                 viewport={"width": 1440, "height": 1200},
                 locale="en-US",
@@ -334,11 +335,16 @@ async def fetch_with_browser(
     url: str,
     strategy: SiteStrategy | None,
     pool: BrowserPool,
+    storage_state: dict | None = None,
 ) -> BrowserResult:
-    """Render the page, strip the paywall, return rendered HTML + DOM extract."""
+    """Render the page, strip the paywall, return rendered HTML + DOM extract.
+
+    `storage_state` carries the reader's own publisher cookies when they have a
+    session for this domain — the page then renders what they actually pay for.
+    """
     ua = strategy.useragent_custom if strategy and strategy.useragent_custom else UA_NORMAL
 
-    async with pool.page(user_agent=ua) as page:
+    async with pool.page(user_agent=ua, storage_state=storage_state) as page:
         await _wire_blocking(page, strategy)
 
         status = 0

@@ -50,6 +50,7 @@ export interface FetchResult {
   confidence: string
   paywalled_preview?: boolean
   cached?: boolean
+  used_session?: boolean
 }
 
 export interface Job {
@@ -84,6 +85,7 @@ export interface Health {
   articles_stored?: number
   sites_updated_at?: string
   sites_digest?: string
+  sessions?: number
 }
 
 export interface Lookup {
@@ -93,6 +95,16 @@ export interface Lookup {
   name: string
   bypass_type: string
   needs_browser?: boolean
+  session?: boolean
+}
+
+export interface StoredSession {
+  domain: string
+  cookies: number
+  updated_at: number
+  age_days: number
+  stale: boolean
+  expired: boolean
 }
 
 export interface FetchOptions {
@@ -101,6 +113,7 @@ export interface FetchOptions {
   use_archive: boolean
   include_images: boolean
   proxy_fallback: boolean
+  use_session: boolean
 }
 
 export interface RecentArticle {

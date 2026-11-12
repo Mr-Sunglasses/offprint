@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { DomainStat } from '../types'
-import { domainStats, updateSiteTable } from '../api'
+import type { DomainStat, StoredSession } from '../types'
+import { addSession, domainStats, listSessions, removeSession, updateSiteTable } from '../api'
 import { Icon } from './Icon'
 
 interface Props {
@@ -16,6 +16,10 @@ export function StatsModal({ open, onClose, siteCount, sitesUpdatedAt }: Props) 
   const [loading, setLoading] = useState(false)
   const [updateState, setUpdateState] = useState('')
   const [updating, setUpdating] = useState(false)
+  const [sessions, setSessions] = useState<StoredSession[]>([])
+  const [sessionDomain, setSessionDomain] = useState('')
+  const [sessionCookie, setSessionCookie] = useState('')
+  const [sessionNote, setSessionNote] = useState('')
 
   useEffect(() => {
     if (!open) return
@@ -27,6 +31,9 @@ export function StatsModal({ open, onClose, siteCount, sitesUpdatedAt }: Props) 
       })
       .catch(() => setDomains([]))
       .finally(() => setLoading(false))
+    listSessions()
+      .then((response) => setSessions(response.sessions))
+      .catch(() => setSessions([]))
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
@@ -53,6 +60,27 @@ export function StatsModal({ open, onClose, siteCount, sitesUpdatedAt }: Props) 
     } finally {
       setUpdating(false)
     }
+  }
+
+  async function saveSession() {
+    const domain = sessionDomain.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+    if (!domain || !sessionCookie.trim()) {
+      setSessionNote('A domain and a cookie string are both required.')
+      return
+    }
+    try {
+      const saved = await addSession(domain, sessionCookie.trim())
+      setSessionNote(`Saved ${saved.cookies} cookies for ${saved.domain}.`)
+      setSessionCookie('')
+      setSessions((await listSessions()).sessions)
+    } catch (err) {
+      setSessionNote(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function dropSession(domain: string) {
+    await removeSession(domain).catch(() => undefined)
+    setSessions((await listSessions()).sessions)
   }
 
   if (!open) return null
@@ -141,6 +169,57 @@ export function StatsModal({ open, onClose, siteCount, sitesUpdatedAt }: Props) 
             </table>
           </div>
         )}
+
+        <div className="sessions">
+          <h3 className="sessions-title">Publisher sessions</h3>
+          <p className="sessions-hint">
+            Paste the <code>Cookie</code> header from a publisher you subscribe to. Offprint renders
+            those pages with your login instead of the metered preview, keeps the cookies in a 0600
+            file on this machine, and never sends a signed-in URL to the reader proxy. The CLI can do
+            it too: <code>offprint session add economist.com</code>.
+          </p>
+
+          {sessions.length > 0 ? (
+            <ul className="session-list">
+              {sessions.map((row) => (
+                <li key={row.domain} className="session-row">
+                  <span className="session-domain">{row.domain}</span>
+                  <span className="session-meta">
+                    {row.cookies} cookies · {row.age_days}d old
+                    {row.expired ? ' · expired' : row.stale ? ' · stale' : ''}
+                  </span>
+                  <button className="link-btn" onClick={() => void dropSession(row.domain)}>
+                    remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="site-empty">No sessions stored.</p>
+          )}
+
+          <div className="session-form">
+            <input
+              className="session-input"
+              placeholder="economist.com"
+              value={sessionDomain}
+              onChange={(event) => setSessionDomain(event.target.value)}
+              spellCheck={false}
+            />
+            <input
+              className="session-input session-input-wide"
+              placeholder="Cookie: sid=…; cf_clearance=…"
+              value={sessionCookie}
+              onChange={(event) => setSessionCookie(event.target.value)}
+              spellCheck={false}
+            />
+            <button className="tool-btn" onClick={() => void saveSession()}>
+              <Icon name="check" size={14} />
+              Save
+            </button>
+          </div>
+          {sessionNote && <p className="sessions-hint">{sessionNote}</p>}
+        </div>
       </div>
     </div>
   )

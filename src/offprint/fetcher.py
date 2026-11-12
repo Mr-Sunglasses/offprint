@@ -17,7 +17,10 @@ import httpx
 
 from .browser import BrowserPool, fetch_with_browser
 from .extract import extract_article
+from .oa import doi_from_url, find_open_access
+from .politeness import HostLimiter
 from .proxy import fetch_via_reader_proxy, proxy_enabled, site_name_from_url
+from .session import cookie_header, session_for_url
 from .vendor.sites import SiteStrategy, get_sites_map, match_strategy
 from .vendor.strategy import (
     TIMEOUT,
@@ -130,6 +133,7 @@ class FetchResult:
 
     paywalled_preview: bool = False
     winner_stage: str = ""
+    used_session: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -142,6 +146,7 @@ class FetchResult:
             "confidence": self.confidence,
             "paywalled_preview": self.paywalled_preview,
             "winner_stage": self.winner_stage,
+            "used_session": self.used_session,
         }
 
 
@@ -152,6 +157,7 @@ class FetchOptions:
     use_archive: bool = True
     include_images: bool = True
     proxy_fallback: bool = True
+    use_session: bool = True
 
 
 # --------------------------------------------------------------------------- #
@@ -239,11 +245,111 @@ async def fetch_article(
     best_stage = ""
     hard_wall = False
     proxy_tried = False
+    oa_tried = False
+    limiter = HostLimiter()
+
+    session_state = session_for_url(url) if options.use_session else None
+    session_cookie = cookie_header(url) if session_state else None
+    used_session = bool(session_state)
+    if used_session:
+        await emit(
+            "session",
+            "done",
+            f"Using your {strategy_info['domain']} session "
+            f"({len(session_state.get('cookies', []))} cookies)",
+        )
+
+    async def run_open_access() -> None:
+        """Ask the OA indexes for a legitimate free copy of this paper."""
+        nonlocal best, best_stage, oa_tried
+        if oa_tried:
+            return
+        oa_tried = True
+        title = (best or {}).get("title") or ""
+        # A DOI in the URL is enough to look the paper up, even when the page
+        # itself was walled and we never got a title out of it.
+        if len(title) < 12 and not doi_from_url(url):
+            return
+
+        await emit("openaccess", "running", "Looking for an open-access copy")
+        t0 = time.perf_counter()
+        try:
+            found = await find_open_access(title, url)
+        except Exception as exc:
+            attempts.append(
+                Attempt(
+                    "openaccess",
+                    "Open access",
+                    False,
+                    0,
+                    0,
+                    False,
+                    _ms(t0),
+                    f"{type(exc).__name__}: {exc}"[:160],
+                )
+            )
+            await emit("openaccess", "failed", "Open-access lookup failed")
+            return
+
+        if not found:
+            attempts.append(
+                Attempt(
+                    "openaccess", "Open access", False, 0, 0, False, _ms(t0), "no OA copy found"
+                )
+            )
+            await emit("openaccess", "failed", "No open-access copy found")
+            return
+
+        try:
+            await limiter.wait(found["url"])
+            async with httpx.AsyncClient(follow_redirects=True, timeout=TIMEOUT) as oa_client:
+                resp = await oa_client.get(found["url"], headers=googlebot_headers())
+            art = consider(resp.text)
+            art["url"] = url  # keep the citation pointing at what was asked for
+            chars = len(art["text"])
+            attempts.append(
+                Attempt(
+                    "openaccess",
+                    "Open access",
+                    chars > 0,
+                    resp.status_code,
+                    chars,
+                    False,
+                    _ms(t0),
+                    f"{found['source']} · {found.get('host') or 'repository'}",
+                )
+            )
+            await emit(
+                "openaccess",
+                "done" if chars else "failed",
+                f"{chars:,} chars from {found['source']}",
+            )
+            if chars:
+                take(art, f"Open access ({found['source']})")
+        except Exception as exc:
+            attempts.append(
+                Attempt(
+                    "openaccess",
+                    "Open access",
+                    False,
+                    0,
+                    0,
+                    False,
+                    _ms(t0),
+                    f"{type(exc).__name__}: {exc}"[:160],
+                )
+            )
+            await emit("openaccess", "failed", "Open-access copy could not be fetched")
 
     async def run_proxy() -> None:
         """Fallback through a text-rendering proxy (fetches from its own IP)."""
         nonlocal best, best_stage, proxy_tried
         if proxy_tried or not options.proxy_fallback or not proxy_enabled():
+            return
+        if used_session:
+            # A signed-in URL is not something to hand to a third party.
+            await emit("proxy", "skipped", "Skipped: your session is in use")
+            proxy_tried = True
             return
         proxy_tried = True
         await emit("proxy", "running", "Asking a reader proxy to fetch it from its network")
@@ -305,8 +411,12 @@ async def fetch_article(
             # --- 1. direct request, site-specific headers ---------------------- #
             await emit("http", "running", "Direct request with site-specific headers")
             t0 = time.perf_counter()
+            await limiter.wait(url)
+            http_headers = build_headers(strategy)
+            if session_cookie:
+                http_headers["Cookie"] = session_cookie
             try:
-                resp = await client.get(url, headers=build_headers(strategy))
+                resp = await client.get(url, headers=http_headers)
             except Exception as exc:
                 attempts.append(
                     Attempt(
@@ -348,11 +458,14 @@ async def fetch_article(
                 else:
                     take(art, "Direct request")
                     if best is not None and _rank(best) >= GOOD_ENOUGH_CHARS:
-                        return _finish(best, best_stage, strategy_info, attempts, started)
+                        return _finish(
+                            best, best_stage, strategy_info, attempts, started, used_session
+                        )
 
             # --- 2. crawler User-Agent ---------------------------------------- #
             await emit("bot", "running", "Retrying as a search-engine crawler")
             t0 = time.perf_counter()
+            await limiter.wait(url)
             try:
                 resp = await client.get(url, headers=googlebot_headers())
                 paywalled = looks_paywalled(resp.text)
@@ -381,7 +494,9 @@ async def fetch_article(
                 else:
                     take(art, "Crawler User-Agent")
                     if best is not None and _rank(best) >= GOOD_ENOUGH_CHARS:
-                        return _finish(best, best_stage, strategy_info, attempts, started)
+                        return _finish(
+                            best, best_stage, strategy_info, attempts, started, used_session
+                        )
             except Exception as exc:
                 attempts.append(
                     Attempt(
@@ -404,12 +519,17 @@ async def fetch_article(
         # A Cloudflare/DataDome wall won't fall to a local browser: the wall is
         # scoring our IP, so try the proxy first and save 20 seconds.
         if hard_wall and best is None:
+            # A repository copy beats a proxy: free, legitimate, and it doesn't
+            # tell anyone what you were reading.
+            await run_open_access()
+            if best is not None and (_rank(best) >= GOOD_ENOUGH_CHARS or hard_wall):
+                return _finish(best, best_stage, strategy_info, attempts, started, used_session)
             await run_proxy()
             # Behind a Cloudflare/DataDome wall a local browser can't win, and a
             # preview is all a subscription site will ever hand over — stop here
             # instead of burning another 25 seconds to prove it.
             if best is not None and (_rank(best) >= GOOD_ENOUGH_CHARS or hard_wall):
-                return _finish(best, best_stage, strategy_info, attempts, started)
+                return _finish(best, best_stage, strategy_info, attempts, started, used_session)
 
         # --- 3. headless browser ------------------------------------------ #
         if not options.skip_browser:
@@ -418,10 +538,11 @@ async def fetch_article(
             )
             t0 = time.perf_counter()
             try:
+                await limiter.wait(url)
                 result = (
-                    await fetch_with_browser(url, strategy, pool)
+                    await fetch_with_browser(url, strategy, pool, storage_state=session_state)
                     if pool is not None
-                    else await _one_off_browser(url, strategy)
+                    else await _one_off_browser(url, strategy, storage_state=session_state)
                 )
                 art = consider(result.html, result.dom)
                 chars = len(art["text"])
@@ -461,11 +582,16 @@ async def fetch_article(
                 await emit("browser", "failed", "Browser render failed")
 
         if best is None or _rank(best) < GOOD_ENOUGH_CHARS:
+            await run_open_access()
+            if best is not None and _rank(best) >= GOOD_ENOUGH_CHARS:
+                return _finish(best, best_stage, strategy_info, attempts, started, used_session)
+
+        if best is None or _rank(best) < GOOD_ENOUGH_CHARS:
             await run_proxy()
             if best is not None and (
                 _rank(best) >= GOOD_ENOUGH_CHARS or best.get("paywalled_preview")
             ):
-                return _finish(best, best_stage, strategy_info, attempts, started)
+                return _finish(best, best_stage, strategy_info, attempts, started, used_session)
 
         # --- 4. Wayback Machine ------------------------------------------- #
         if options.use_archive and (best is None or _rank(best) < GOOD_ENOUGH_CHARS):
@@ -523,10 +649,12 @@ async def fetch_article(
             code="no_content",
         )
 
-    return _finish(best, best_stage, strategy_info, attempts, started)
+    return _finish(best, best_stage, strategy_info, attempts, started, used_session)
 
 
-def _finish(article, via, strategy_info, attempts, started) -> FetchResult:
+def _finish(
+    article, via, strategy_info, attempts, started, used_session: bool = False
+) -> FetchResult:
     if article and not article.get("images"):
         article["images"] = re.findall(r"!\[[^\]]*\]\(([^)\s]+)\)", article.get("markdown", ""))
     words = article.get("word_count", 0)
@@ -549,6 +677,7 @@ def _finish(article, via, strategy_info, attempts, started) -> FetchResult:
         confidence=confidence,
         paywalled_preview=preview,
         winner_stage=winner_stage,
+        used_session=used_session,
     )
 
 
@@ -582,11 +711,13 @@ async def _archive_candidates(client: httpx.AsyncClient, url: str) -> list[str]:
     return candidates
 
 
-async def _one_off_browser(url: str, strategy: SiteStrategy | None):
+async def _one_off_browser(
+    url: str, strategy: SiteStrategy | None, storage_state: dict | None = None
+):
     pool = BrowserPool(max_contexts=1)
     await pool.start()
     try:
-        return await fetch_with_browser(url, strategy, pool)
+        return await fetch_with_browser(url, strategy, pool, storage_state=storage_state)
     finally:
         await pool.stop()
 

@@ -11,11 +11,13 @@ React + Vite reader, packaged with **uv**.
 ```
 ┌──────────────┐    POST /api/fetch     ┌─────────────────────────────────────────┐
 │  Browser UI  │ ─────────────────────► │  FastAPI  →  fetch pipeline             │
-│ React + Vite │ ◄───── poll job ────── │   1. site strategy headers              │
+│ React + Vite │ ◄───── poll job ────── │   0. your session cookies (if stored)   │
+                                        │   1. site strategy headers              │
 └──────────────┘                        │   2. crawler User-Agent                 │
                                         │   3. headless Chromium (JS walls)       │
-      permalink ──► SQLite              │   4. reader proxy (foreign IP, opt-out) │
-                                        │   5. Wayback Machine                    │
+      permalink ──► SQLite              │   4. open-access copy (OpenAlex)        │
+                                        │   5. reader proxy (foreign IP, opt-out) │
+                                        │   6. Wayback Machine                    │
                                         │  → trafilatura → Markdown               │
                                         └─────────────────────────────────────────┘
 ```
@@ -66,6 +68,17 @@ cd web && npm run dev       # UI on :5173, proxies /api to :8000
 
 ## What it does
 
+- **Your own subscriptions, rendered properly.** Store the cookies from a
+  publisher you pay for (`offprint session add economist.com`) and Offprint reads
+  the full article instead of the metered teaser — with your login, on your
+  machine, and without the reader proxy ever seeing the URL.
+- **Open-access resolution.** Before any proxy fallback, Offprint asks OpenAlex
+  (and Unpaywall when a contact email is set) whether the paper has a legitimate
+  free copy — accepted manuscripts in repositories, arXiv preprints. Verified
+  live: "Attention Is All You Need" → arXiv, "Deep learning" → HAL.
+- **Polite by default.** One request per host every 1.2s, cached results served
+  from SQLite. A tool that hammers a publisher four times per URL gets its IP
+  scored, and a scored IP turns into 403s and 429s.
 - **Batch mode** — paste up to 50 links, they resolve in parallel through the same
   cache and rate limiter, with per-item status and one click into any result.
 - **Discovery** — point it at a publication and it reads that site's own RSS feed
@@ -97,6 +110,31 @@ cd web && npm run dev       # UI on :5173, proxies /api to :8000
   trace (which stage won and why), and a searchable list of supported sites.
 - **Image proxy** so article images render even when the CDN checks `Referer`.
 
+## Publisher sessions
+
+A metered article stays metered for an anonymous request — that's the publisher
+honouring its own rules. The way through is the subscription you already have:
+
+```bash
+offprint session add economist.com     # opens a real browser; log in, press Enter
+offprint session add nytimes.com --cookie "sid=…; cf_clearance=…"   # or paste one
+offprint session list
+offprint session remove economist.com
+```
+
+Cookies are written to `OFFPRINT_SESSION_DIR` (default
+`~/.config/offprint/sessions/`), one `0600` JSON file per domain, in Playwright's
+storage_state shape. Two rules the pipeline enforces:
+
+1. **The reader proxy is skipped** whenever a session is in play — a signed-in
+   URL is never handed to a third party.
+2. **The crawler-UA stage stays anonymous** — sending your cookies with a
+   Googlebot identity is exactly the sort of thing that gets an account flagged.
+
+The same mechanism covers "hard login" publishers (FT, Bloomberg, WSJ): if you
+subscribe, the article renders; if you don't, it stays unreadable, which is the
+correct outcome.
+
 ## API
 
 | Method | Path | Purpose |
@@ -109,6 +147,9 @@ cd web && npm run dev       # UI on :5173, proxies /api to :8000
 | `GET` | `/api/discover?site=&since=7d&limit=` | recent articles via RSS/sitemap |
 | `GET` | `/api/search?q=` | full-text search over stored articles |
 | `GET` | `/api/stats` | per-domain stage outcomes |
+| `GET` | `/api/sessions` | stored publisher sessions |
+| `POST` | `/api/sessions/{domain}` | `{cookie}` → save a session |
+| `DELETE` | `/api/sessions/{domain}` | forget a session |
 | `GET` | `/api/articles/{id}/epub` | EPUB export |
 | `GET` | `/api/articles/{id}/pdf` | PDF export (Chromium) |
 | `POST` | `/api/sites/update?force=` | refresh the site table from upstream |
@@ -148,6 +189,10 @@ curl -s -X POST localhost:8000/api/fetch \
 | `OFFPRINT_SITES_UPDATE_URL` | bpc-fetch raw GitHub | Where to pull the table from |
 | `OFFPRINT_SITES_JS` | bundled copy | Writable path for the site table (set in Docker) |
 | `OFFPRINT_ADMIN_TOKEN` | – | If set, `/api/sites/update` requires `X-Admin-Token` |
+| `OFFPRINT_SESSION_DIR` | `~/.config/offprint/sessions` | Where publisher cookies live |
+| `OFFPRINT_SESSION_MAX_AGE_DAYS` | `30` | Age at which a session is flagged stale |
+| `OFFPRINT_CONTACT_EMAIL` | – | Enables the Unpaywall lookup (their API asks for one) |
+| `OFFPRINT_HOST_INTERVAL` | `1.2` | Seconds between requests to the same host |
 
 ## Docker
 
@@ -172,6 +217,9 @@ src/offprint/
   browser.py   Playwright pool, route blocking, overlay removal, DOM read
   jobs.py      in-memory job store, TTL cache, rate limiter
   batch.py     batch store: many URLs, one id, per-item status
+  session.py   per-publisher cookie store (Playwright storage_state, 0600)
+  oa.py        open-access resolution via OpenAlex / Unpaywall
+  politeness.py  per-host request spacing
   discover.py  RSS/Atom + sitemap discovery, with a known-feed table
   export.py    EPUB builder and PDF print document
   proxy.py     reader-proxy stage (Jina envelope -> Markdown, prose window)
@@ -186,19 +234,24 @@ tests/         pytest: parser, URL handling, extraction, API smoke
 
 ## Limits, stated plainly
 
-- **Metered articles stay metered.** The Economist hands over the first ~100
-  words and nothing else; the reader shows exactly that and labels it a preview.
-  No header trick, browser or proxy changes a subscription gate.
+- **Metered articles stay metered — for anonymous requests.** Without a session,
+  The Economist hands over the first ~100 words and the reader says so. With
+  `offprint session add economist.com`, the same page renders in full. There is
+  no third state: you either have access or you don't, and the tool now
+  represents your access instead of guessing at it.
 - **IP-reputation walls.** Cloudflare ("Just a moment…") and DataDome (NYT) score
   the *network*, not just the fingerprint. From a blocked IP — several VPNs and
   datacenter ranges — the direct, crawler and browser stages all 403. That is why
   the reader proxy exists; if you'd rather not use it, `OFFPRINT_READER_PROXY=0`.
+- **Sessions are secrets.** They're stored `0600`, never logged, never sent to
+  the proxy — but they are live credentials for your account. Don't commit the
+  directory, and rotate (`session remove` + `session add`) if a device is lost.
 - **The reader proxy is a third party.** When that stage runs, the article URL is
   sent to `r.jina.ai` (or whichever `OFFPRINT_READER_PROXY_URL` you set). The trace
   says "Reader proxy" so you always know. Self-host a reader and point the env
   var at it if that matters to you.
-- **Hard logins** (Bloomberg terminal, FT subscriber paths) are unreachable — no
-  tricks beat an auth server.
+- **Hard logins need credentials you own** — that's what the session store is
+  for. Nothing in this tool defeats an auth server, and it won't pretend to.
 - Chromium must be installed for JS paywalls (`uv run playwright install chromium`).
 - Jobs are in-memory and the app is single-process by design; articles persist in
   SQLite, but progress traces don't survive a restart. Put a real queue in front

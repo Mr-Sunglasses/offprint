@@ -25,6 +25,15 @@ from .discover import DiscoverError, discover_articles
 from .export import build_epub, build_pdf_html, epub_filename, pdf_filename
 from .fetcher import FetchOptions, normalise_url
 from .jobs import JobStore, RateLimiter, cache_key_for
+from .session import (
+    delete_session,
+    list_sessions,
+    parse_cookie_header,
+    save_session,
+)
+from .session import (
+    describe as describe_session,
+)
 from .sites_updater import check_and_update, read_meta
 from .store import get_store
 from .vendor.sites import get_sites_map, match_strategy
@@ -87,6 +96,10 @@ app.add_middleware(
 # --------------------------------------------------------------------------- #
 
 
+class SessionRequest(BaseModel):
+    cookie: str = Field(min_length=1, max_length=8192, description="A `Cookie:` header value")
+
+
 class BatchRequest(BaseModel):
     urls: list[str] = Field(min_length=1, max_length=50)
     force_browser: bool = False
@@ -94,6 +107,7 @@ class BatchRequest(BaseModel):
     use_archive: bool = True
     include_images: bool = True
     proxy_fallback: bool = True
+    use_session: bool = True
 
     def to_options(self) -> FetchOptions:
         return FetchOptions(
@@ -102,6 +116,7 @@ class BatchRequest(BaseModel):
             use_archive=self.use_archive,
             include_images=self.include_images,
             proxy_fallback=self.proxy_fallback,
+            use_session=self.use_session,
         )
 
 
@@ -112,6 +127,7 @@ class FetchRequest(BaseModel):
     use_archive: bool = True
     include_images: bool = True
     proxy_fallback: bool = True
+    use_session: bool = True
 
 
 # --------------------------------------------------------------------------- #
@@ -198,6 +214,7 @@ async def health() -> dict:
         "sites_supported": len(sites),
         "playwright_ready": _playwright_ready(),
         "articles_stored": get_store().count(),
+        "sessions": len(list_sessions()),
         "sites_updated_at": read_meta().get("last_updated")
         or read_meta().get("last_checked")
         or "",
@@ -220,6 +237,7 @@ async def create_fetch(request: Request, body: FetchRequest) -> dict:
         use_archive=body.use_archive,
         include_images=body.include_images,
         proxy_fallback=body.proxy_fallback,
+        use_session=body.use_session,
     )
     cache_key = cache_key_for(url, options)
     job = request.app.state.jobs.submit(url, options, cache_key)
@@ -307,6 +325,32 @@ async def get_batch(request: Request, batch_id: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Sessions: your own publisher logins
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/api/sessions")
+async def get_sessions() -> dict:
+    return {"sessions": list_sessions()}
+
+
+@app.post("/api/sessions/{domain}")
+async def put_session(domain: str, body: SessionRequest) -> dict:
+    cookies = parse_cookie_header(body.cookie, domain)
+    if not cookies:
+        raise HTTPException(status_code=422, detail="Could not parse that cookie string.")
+    try:
+        return save_session(domain, cookies)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/api/sessions/{domain}")
+async def remove_session(domain: str) -> dict:
+    return {"removed": delete_session(domain)}
+
+
+# --------------------------------------------------------------------------- #
 # Library: full-text search over everything fetched so far
 # --------------------------------------------------------------------------- #
 
@@ -327,6 +371,7 @@ async def domain_stats(limit: int = Query(40, ge=1, le=200)) -> dict:
         "domains": stats,
         "tracked": len(stats),
         "articles_stored": get_store().count(),
+        "sessions": len(list_sessions()),
     }
 
 
@@ -380,6 +425,7 @@ async def lookup(url: str = Query(min_length=3, max_length=2048)) -> dict:
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     strategy = match_strategy(normalised)
+    session = describe_session(normalised)
     if strategy is None:
         return {
             "url": normalised,
@@ -387,6 +433,7 @@ async def lookup(url: str = Query(min_length=3, max_length=2048)) -> dict:
             "domain": urlparse(normalised).hostname or "",
             "bypass_type": "generic",
             "name": "",
+            "session": session["has_session"],
         }
     return {
         "url": normalised,
@@ -395,6 +442,7 @@ async def lookup(url: str = Query(min_length=3, max_length=2048)) -> dict:
         "name": strategy.name,
         "bypass_type": strategy.bypass_type(),
         "needs_browser": strategy.needs_browser(),
+        "session": session["has_session"],
     }
 
 
