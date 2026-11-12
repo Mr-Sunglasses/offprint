@@ -1,6 +1,6 @@
 """Reader-proxy parsing tests (no network)."""
 
-from bpc_web.proxy import article_from_reader_payload, parse_reader_payload, prose_window
+from offprint.proxy import article_from_reader_payload, parse_reader_payload, prose_window
 
 PAYLOAD = """Title: Jensen Huang must resign
 

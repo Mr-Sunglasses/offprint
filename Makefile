@@ -2,7 +2,7 @@
 
 help:
 	@echo "install   uv sync + Playwright Chromium + npm install"
-	@echo "web       build the front end into src/bpc_web/static"
+	@echo "web       build the front end into src/offprint/static"
 	@echo "serve     run the app on http://127.0.0.1:8000"
 	@echo "dev       API with reload + Vite dev server on :5173"
 	@echo "test      pytest"
@@ -17,10 +17,10 @@ web:
 	cd web && npm run build
 
 serve: web
-	uv run bpc-web --host 0.0.0.0 --port 8000
+	uv run offprint --host 0.0.0.0 --port 8000
 
 dev:
-	uv run bpc-web --dev --port 8000 & \
+	uv run offprint --dev --port 8000 & \
 	cd web && npm run dev
 
 test:
@@ -33,5 +33,5 @@ fmt:
 	uv run ruff format src tests
 
 clean:
-	rm -rf web/node_modules src/bpc_web/static .pytest_cache
+	rm -rf web/node_modules src/offprint/static .pytest_cache
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +

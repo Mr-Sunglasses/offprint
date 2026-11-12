@@ -1,6 +1,6 @@
 """Site table updater: validation and digest logic (no network)."""
 
-from bpc_web.sites_updater import _digest, _looks_valid
+from offprint.sites_updater import _digest, _looks_valid
 
 
 def test_digest_is_stable_and_short():
@@ -10,7 +10,7 @@ def test_digest_is_stable_and_short():
 
 
 def test_valid_table_is_accepted():
-    body = 'var defaultSites = {' + '  "Site": { domain: "example.com" },\n' * 600 + '}'
+    body = "var defaultSites = {" + '  "Site": { domain: "example.com" },\n' * 600 + "}"
     assert _looks_valid(body) is True
 
 

@@ -17,8 +17,8 @@ type Phase = 'idle' | 'fetching' | 'done' | 'error'
 type Mode = 'link' | 'batch' | 'latest'
 type HistoryEntry = { url: string; title: string; site: string; at: number }
 
-const HISTORY_KEY = 'bpc-fetch-history'
-const THEME_KEY = 'bpc-fetch-theme'
+const HISTORY_KEY = 'offprint-history'
+const THEME_KEY = 'offprint-theme'
 const MAX_HISTORY = 8
 
 const DEFAULT_OPTIONS: FetchOptions = {
@@ -290,7 +290,7 @@ export default function App() {
                 Read the <em>whole</em> story.
               </h1>
               <p className="hero-deck">
-                Paste a link. bpc-fetch knocks the way a search engine would, renders whatever
+                Paste a link. Offprint knocks the way a search engine would, renders whatever
                 JavaScript is left, and hands you the article as clean Markdown — images, headings
                 and all.
               </p>
@@ -347,7 +347,7 @@ export default function App() {
                 <p className="tool-deck">
                   {mode === 'batch'
                     ? 'Paste up to 50 article URLs. They resolve in parallel, honouring the same cache and rate limits as a single fetch.'
-                    : 'Pick a publication and bpc-fetch reads its own RSS feed or sitemap — then you choose what to fetch.'}
+                    : 'Pick a publication and Offprint reads its own RSS feed or sitemap — then you choose what to fetch.'}
                 </p>
               </div>
 
@@ -429,7 +429,7 @@ export default function App() {
 
         <footer className="foot">
           <span>
-            bpc-fetch web · {info ? `v${info.version}` : 'v0.1.0'} ·{' '}
+            Offprint · {info ? `v${info.version}` : 'v0.1.0'} ·{' '}
             {(info?.sites_supported ?? 936).toLocaleString()} sites ·{' '}
             {(info?.articles_stored ?? 0).toLocaleString()} stored
           </span>

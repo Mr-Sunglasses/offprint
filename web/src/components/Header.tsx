@@ -24,9 +24,9 @@ export function Header({
   return (
     <header className="topbar">
       <button className="brand" onClick={onReset} title="Start over">
-        <span className="brand-mark">bpc</span>
+        <span className="brand-mark">off</span>
         <span className="brand-dot">·</span>
-        <span className="brand-tail">fetch</span>
+        <span className="brand-tail">print</span>
       </button>
 
       {compact && <span className="topbar-note">Markdown, images, the whole story</span>}

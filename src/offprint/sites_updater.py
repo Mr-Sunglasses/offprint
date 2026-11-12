@@ -20,10 +20,10 @@ import httpx
 from .vendor import sites as sites_module
 
 UPSTREAM_URL = os.getenv(
-    "BPC_SITES_UPDATE_URL",
+    "OFFPRINT_SITES_UPDATE_URL",
     "https://raw.githubusercontent.com/Sophomoresty/bpc-fetch/main/data/sites.js",
 )
-CHECK_INTERVAL_HOURS = float(os.getenv("BPC_SITES_UPDATE_HOURS", "24"))
+CHECK_INTERVAL_HOURS = float(os.getenv("OFFPRINT_SITES_UPDATE_HOURS", "24"))
 MIN_DOMAINS = 500
 
 

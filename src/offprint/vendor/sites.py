@@ -55,7 +55,7 @@ TWO_PART_TLDS = {
 
 def _default_sites_js() -> Path:
     """Locate sites.js: explicit env -> PyInstaller bundle -> package data -> repo."""
-    override = os.getenv("BPC_SITES_JS")
+    override = os.getenv("OFFPRINT_SITES_JS")
     if override:
         return Path(override)
     bundled = getattr(sys, "_MEIPASS", None)

@@ -5,7 +5,7 @@ your IP, and archive.org eventually rate-limits busy IPs too. A text-rendering
 proxy fetches from *its* network instead, so the wall never sees you.
 
 This uses Jina Reader's public endpoint (https://r.jina.ai/<url>), which returns
-Markdown. It is opt-out: set BPC_READER_PROXY=0 to disable, or flip the toggle
+Markdown. It is opt-out: set OFFPRINT_READER_PROXY=0 to disable, or flip the toggle
 in the UI. The article URL is sent to a third party when this stage runs, which
 is why the trace names it explicitly.
 """
@@ -21,8 +21,8 @@ import httpx
 from .extract import finalise_markdown
 from .vendor.strategy import looks_metered
 
-PROXY_BASE = os.getenv("BPC_READER_PROXY_URL", "https://r.jina.ai/")
-PROXY_TIMEOUT = float(os.getenv("BPC_READER_PROXY_TIMEOUT", "45"))
+PROXY_BASE = os.getenv("OFFPRINT_READER_PROXY_URL", "https://r.jina.ai/")
+PROXY_TIMEOUT = float(os.getenv("OFFPRINT_READER_PROXY_TIMEOUT", "45"))
 
 # Ordered: narrowest selector first, then the whole page.
 SELECTORS = ("article", "main", "")
@@ -38,7 +38,7 @@ _META_KEYS = {
 
 
 def proxy_enabled() -> bool:
-    return os.getenv("BPC_READER_PROXY", "1") not in ("0", "false", "False", "no")
+    return os.getenv("OFFPRINT_READER_PROXY", "1") not in ("0", "false", "False", "no")
 
 
 def parse_reader_payload(text: str) -> tuple[dict, str]:
@@ -140,11 +140,11 @@ async def fetch_via_reader_proxy(url: str, client: httpx.AsyncClient | None = No
         client = httpx.AsyncClient(follow_redirects=True, timeout=PROXY_TIMEOUT)
 
     headers = {
-        "User-Agent": "bpc-fetch-web/0.1 (+https://github.com/Sophomoresty/bpc-fetch)",
+        "User-Agent": "offprint/0.1 (+https://github.com/Sophomoresty/bpc-fetch)",
         "x-respond-with": "markdown",
         "accept": "text/plain",
     }
-    token = os.getenv("BPC_READER_PROXY_TOKEN")
+    token = os.getenv("OFFPRINT_READER_PROXY_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
 

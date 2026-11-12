@@ -1,8 +1,12 @@
-# bpc-fetch web
+# Offprint
 
-A self-hosted web front end for [bpc-fetch](https://github.com/Sophomoresty/bpc-fetch):
-paste a link, read the article as clean Markdown. Backed by FastAPI, driven by a
-React + Vite front end, packaged with **uv**.
+An **offprint** is a single article printed out of a larger publication. That is
+what this does: paste a link, get that article back as clean Markdown — no
+chrome, no meter, no subscription wall.
+
+Offprint is a self-hosted web front end for
+[bpc-fetch](https://github.com/Sophomoresty/bpc-fetch). FastAPI behind a
+React + Vite reader, packaged with **uv**.
 
 ```
 ┌──────────────┐    POST /api/fetch     ┌─────────────────────────────────────────┐
@@ -31,7 +35,7 @@ React + Vite front end, packaged with **uv**.
 ## Quick start
 
 ```bash
-git clone <this repo> && cd bpc-fetch-web
+git clone <this repo> && cd offprint
 
 make install        # uv sync + Playwright Chromium + npm install
 make serve          # builds the UI, serves on http://127.0.0.1:8000
@@ -43,7 +47,7 @@ Without make:
 uv sync
 uv run playwright install chromium      # only needed for JS paywalls
 cd web && npm install && npm run build && cd ..
-uv run bpc-web                          # http://127.0.0.1:8000
+uv run offprint                          # http://127.0.0.1:8000
 ```
 
 A fetch you can point at a real article:
@@ -56,7 +60,7 @@ curl -s -X POST localhost:8000/api/fetch -H 'content-type: application/json' \
 Development with HMR:
 
 ```bash
-uv run bpc-web --dev        # API on :8000, auto-reload
+uv run offprint --dev        # API on :8000, auto-reload
 cd web && npm run dev       # UI on :5173, proxies /api to :8000
 ```
 
@@ -128,22 +132,22 @@ curl -s -X POST localhost:8000/api/fetch \
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `BPC_MAX_CONCURRENT` | `4` | Parallel fetches |
-| `BPC_BROWSER_CONTEXTS` | `2` | Chromium contexts in the pool |
-| `BPC_RATE_LIMIT` | `40` | Requests per IP per 10 minutes |
-| `BPC_DISABLE_RATE_LIMIT` | – | Set to `1` to disable |
-| `BPC_CORS_ORIGINS` | `localhost:5173,...` | Dev CORS origins |
-| `BPC_READER_PROXY` | `1` | Enable the reader-proxy stage (set `0` to disable) |
-| `BPC_READER_PROXY_TOKEN` | – | Bearer token for the proxy's higher rate limits |
-| `BPC_READER_PROXY_URL` | `https://r.jina.ai/` | Point at a self-hosted reader instead |
-| `BPC_HEADFUL` | `0` | `1` runs Chromium with a window (local use, passes more challenges) |
-| `BPC_CHALLENGE_WAIT_MS` | `14000` | How long to wait for a JS interstitial to clear |
-| `BPC_DB_PATH` | `~/.cache/bpc-fetch-web/articles.db` | Article store location |
-| `BPC_CDP_URL` | – | Attach to a remote Chromium (`http://browser:9222`) instead of launching one |
-| `BPC_SITES_AUTOUPDATE` | `0` | `1` checks upstream for a new site table at boot + daily |
-| `BPC_SITES_UPDATE_URL` | bpc-fetch raw GitHub | Where to pull the table from |
-| `BPC_SITES_JS` | bundled copy | Writable path for the site table (set in Docker) |
-| `BPC_ADMIN_TOKEN` | – | If set, `/api/sites/update` requires `X-Admin-Token` |
+| `OFFPRINT_MAX_CONCURRENT` | `4` | Parallel fetches |
+| `OFFPRINT_BROWSER_CONTEXTS` | `2` | Chromium contexts in the pool |
+| `OFFPRINT_RATE_LIMIT` | `40` | Requests per IP per 10 minutes |
+| `OFFPRINT_DISABLE_RATE_LIMIT` | – | Set to `1` to disable |
+| `OFFPRINT_CORS_ORIGINS` | `localhost:5173,...` | Dev CORS origins |
+| `OFFPRINT_READER_PROXY` | `1` | Enable the reader-proxy stage (set `0` to disable) |
+| `OFFPRINT_READER_PROXY_TOKEN` | – | Bearer token for the proxy's higher rate limits |
+| `OFFPRINT_READER_PROXY_URL` | `https://r.jina.ai/` | Point at a self-hosted reader instead |
+| `OFFPRINT_HEADFUL` | `0` | `1` runs Chromium with a window (local use, passes more challenges) |
+| `OFFPRINT_CHALLENGE_WAIT_MS` | `14000` | How long to wait for a JS interstitial to clear |
+| `OFFPRINT_DB_PATH` | `~/.cache/offprint/articles.db` | Article store location |
+| `OFFPRINT_CDP_URL` | – | Attach to a remote Chromium (`http://browser:9222`) instead of launching one |
+| `OFFPRINT_SITES_AUTOUPDATE` | `0` | `1` checks upstream for a new site table at boot + daily |
+| `OFFPRINT_SITES_UPDATE_URL` | bpc-fetch raw GitHub | Where to pull the table from |
+| `OFFPRINT_SITES_JS` | bundled copy | Writable path for the site table (set in Docker) |
+| `OFFPRINT_ADMIN_TOKEN` | – | If set, `/api/sites/update` requires `X-Admin-Token` |
 
 ## Docker
 
@@ -155,13 +159,13 @@ docker compose up --build      # http://localhost:8000
 ```
 
 - `app` — FastAPI + built UI, articles and the site table on the `bpc-data` volume
-- `browser` — headless Chromium exposing CDP on :9222 (`BPC_CDP_URL` points at it)
+- `browser` — headless Chromium exposing CDP on :9222 (`OFFPRINT_CDP_URL` points at it)
 - Chromium is installed in the image either way, so `docker run` alone works too.
 
 ## Layout
 
 ```
-src/bpc_web/
+src/offprint/
   main.py      FastAPI app, API routes, static mount
   fetcher.py   the fallback pipeline + progress events
   extract.py   HTML → Markdown (trafilatura, JSON-LD metadata, cleanup)
@@ -188,9 +192,9 @@ tests/         pytest: parser, URL handling, extraction, API smoke
 - **IP-reputation walls.** Cloudflare ("Just a moment…") and DataDome (NYT) score
   the *network*, not just the fingerprint. From a blocked IP — several VPNs and
   datacenter ranges — the direct, crawler and browser stages all 403. That is why
-  the reader proxy exists; if you'd rather not use it, `BPC_READER_PROXY=0`.
+  the reader proxy exists; if you'd rather not use it, `OFFPRINT_READER_PROXY=0`.
 - **The reader proxy is a third party.** When that stage runs, the article URL is
-  sent to `r.jina.ai` (or whichever `BPC_READER_PROXY_URL` you set). The trace
+  sent to `r.jina.ai` (or whichever `OFFPRINT_READER_PROXY_URL` you set). The trace
   says "Reader proxy" so you always know. Self-host a reader and point the env
   var at it if that matters to you.
 - **Hard logins** (Bloomberg terminal, FT subscriber paths) are unreachable — no

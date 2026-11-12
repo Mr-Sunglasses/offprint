@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "bpc-web"
+name = "offprint-reader"
 version = "0.1.0"
-description = "Web front end for bpc-fetch: read paywalled articles as clean Markdown"
+description = "Offprint — read paywalled articles as clean Markdown (a web front end for bpc-fetch)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "bpc-web contributors" }]
+authors = [{ name = "offprint contributors" }]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.scripts]
-bpc-web = "bpc_web.__main__:main"
+offprint = "offprint.__main__:main"
 
 [dependency-groups]
 dev = [
@@ -35,10 +35,10 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/bpc_web"]
+packages = ["src/offprint"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/bpc_web", "README.md", "LICENSE", "NOTICE"]
+include = ["src/offprint", "README.md", "LICENSE", "NOTICE"]
 
 [tool.ruff]
 line-length = 100

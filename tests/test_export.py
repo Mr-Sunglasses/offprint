@@ -5,7 +5,7 @@ import zipfile
 
 import pytest
 
-from bpc_web.export import build_document_html, build_epub, markdown_to_html
+from offprint.export import build_document_html, build_epub, markdown_to_html
 
 ARTICLE = {
     "url": "https://example.com/story",

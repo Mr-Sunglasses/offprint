@@ -8,14 +8,14 @@ import os
 import tempfile
 
 os.environ.setdefault(
-    "BPC_DB_PATH", os.path.join(tempfile.mkdtemp(prefix="bpc-test-"), "articles.db")
+    "OFFPRINT_DB_PATH", os.path.join(tempfile.mkdtemp(prefix="offprint-test-"), "articles.db")
 )
-os.environ.setdefault("BPC_DISABLE_RATE_LIMIT", "1")
+os.environ.setdefault("OFFPRINT_DISABLE_RATE_LIMIT", "1")
 
 import pytest
 from fastapi.testclient import TestClient
 
-from bpc_web.main import app
+from offprint.main import app
 
 
 @pytest.fixture(scope="session")

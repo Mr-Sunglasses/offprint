@@ -32,13 +32,13 @@ from .vendor.sites import get_sites_map, match_strategy
 STATIC_DIR = Path(__file__).parent / "static"
 STARTED_AT = time.time()
 
-MAX_CONCURRENT_FETCHES = int(os.getenv("BPC_MAX_CONCURRENT", "4"))
-RATE_LIMIT = int(os.getenv("BPC_RATE_LIMIT", "40"))
+MAX_CONCURRENT_FETCHES = int(os.getenv("OFFPRINT_MAX_CONCURRENT", "4"))
+RATE_LIMIT = int(os.getenv("OFFPRINT_RATE_LIMIT", "40"))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    pool = BrowserPool(max_contexts=int(os.getenv("BPC_BROWSER_CONTEXTS", "2")))
+    pool = BrowserPool(max_contexts=int(os.getenv("OFFPRINT_BROWSER_CONTEXTS", "2")))
     jobs = JobStore(pool, max_concurrent=MAX_CONCURRENT_FETCHES)
     app.state.pool = pool
     app.state.jobs = jobs
@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
         print(f"[store] indexed {indexed} previously stored article(s) for search")
 
     updater = None
-    if os.getenv("BPC_SITES_AUTOUPDATE", "0") == "1":
+    if os.getenv("OFFPRINT_SITES_AUTOUPDATE", "0") == "1":
         import asyncio
 
         from .sites_updater import auto_update_loop
@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="bpc-fetch web",
+    title="Offprint",
     version=__version__,
     summary="Read paywalled articles as clean Markdown",
     lifespan=lifespan,
@@ -74,7 +74,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv(
-        "BPC_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+        "OFFPRINT_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
     ).split(","),
     allow_credentials=False,
     allow_methods=["*"],
@@ -127,7 +127,7 @@ def _client_key(request: Request) -> str:
 
 
 def _enforce_rate_limit(request: Request) -> None:
-    if os.getenv("BPC_DISABLE_RATE_LIMIT") == "1":
+    if os.getenv("OFFPRINT_DISABLE_RATE_LIMIT") == "1":
         return
     allowed, retry_after = request.app.state.limiter.allow(_client_key(request))
     if not allowed:
@@ -140,7 +140,7 @@ def _enforce_rate_limit(request: Request) -> None:
 
 def _playwright_ready() -> bool:
     """Is a browser available — local Chromium, or a remote CDP endpoint?"""
-    cdp = os.getenv("BPC_CDP_URL", "").strip()
+    cdp = os.getenv("OFFPRINT_CDP_URL", "").strip()
     if cdp:
         parsed = urlparse(cdp)
         try:
@@ -258,7 +258,7 @@ def _frontmatter(article: dict) -> str:
     if article.get("site"):
         lines.append(f'site: "{esc(article["site"])}"')
     lines.append(f"source: {article.get('url', '')}")
-    lines.append("retrieved_by: bpc-fetch-web")
+    lines.append("retrieved_by: offprint")
     lines.append("---\n")
     return "\n".join(lines)
 
@@ -337,7 +337,7 @@ async def domain_stats(limit: int = Query(40, ge=1, le=200)) -> dict:
 
 @app.post("/api/sites/update")
 async def update_site_table(request: Request, force: bool = False) -> dict:
-    token = os.getenv("BPC_ADMIN_TOKEN", "")
+    token = os.getenv("OFFPRINT_ADMIN_TOKEN", "")
     if token and request.headers.get("x-admin-token") != token:
         raise HTTPException(status_code=403, detail="Admin token required.")
     return await check_and_update(force=force)
@@ -546,7 +546,7 @@ async def api_not_found(rest: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Static front end (built with `npm run build` into src/bpc_web/static)
+# Static front end (built with `npm run build` into src/offprint/static)
 # --------------------------------------------------------------------------- #
 
 if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
@@ -565,7 +565,7 @@ else:
         return JSONResponse(
             {
                 "status": "front end not built",
-                "hint": "cd web && npm install && npm run build  (or: uv run bpc-web --dev)",
+                "hint": "cd web && npm install && npm run build  (or: uv run offprint --dev)",
                 "api_docs": "/docs",
             }
         )

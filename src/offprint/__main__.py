@@ -1,4 +1,4 @@
-"""`uv run bpc-web` — start the server."""
+"""`uv run offprint` — start the server."""
 
 from __future__ import annotations
 
@@ -8,9 +8,7 @@ import uvicorn
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="bpc-web", description="Serve the bpc-fetch web UI and API"
-    )
+    parser = argparse.ArgumentParser(prog="offprint", description="Serve the Offprint UI and API")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes")
@@ -20,7 +18,7 @@ def main() -> None:
     args = parser.parse_args()
 
     uvicorn.run(
-        "bpc_web.main:app",
+        "offprint.main:app",
         host=args.host,
         port=args.port,
         reload=args.reload or args.dev,

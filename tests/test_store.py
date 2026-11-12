@@ -1,6 +1,6 @@
 """SQLite article store tests."""
 
-from bpc_web.store import ArticleStore
+from offprint.store import ArticleStore
 
 PAYLOAD = {
     "article": {

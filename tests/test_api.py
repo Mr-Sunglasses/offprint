@@ -1,6 +1,6 @@
 """API tests. The fetch pipeline itself is stubbed so tests stay offline."""
 
-from bpc_web.fetcher import FetchResult
+from offprint.fetcher import FetchResult
 
 FAKE_ARTICLE = {
     "url": "https://example.com/story",
@@ -70,7 +70,7 @@ def test_fetch_rejects_bad_url(client):
 def test_fetch_job_lifecycle(client, monkeypatch):
     import uuid
 
-    import bpc_web.jobs as jobs_module
+    import offprint.jobs as jobs_module
 
     target = f"example.com/{uuid.uuid4().hex[:8]}"
 
@@ -123,7 +123,7 @@ def test_batch_rejects_empty_and_invalid(client):
 
 
 def test_batch_lifecycle(client, monkeypatch):
-    import bpc_web.jobs as jobs_module
+    import offprint.jobs as jobs_module
 
     async def fake_fetch_article(url, options=None, pool=None, progress=None):
         if progress:
@@ -152,7 +152,7 @@ def test_batch_lifecycle(client, monkeypatch):
 
 
 def test_search_and_stats_endpoints(client, monkeypatch):
-    import bpc_web.jobs as jobs_module
+    import offprint.jobs as jobs_module
 
     async def fake_fetch_article(url, options=None, pool=None, progress=None):
         return make_result(url)

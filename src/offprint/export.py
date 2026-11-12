@@ -96,7 +96,7 @@ def build_document_html(
 <h1>{escape(article.get("title") or "")}</h1>
 <p class="byline">{escape(_byline(article))}</p>
 {body}
-<p class="source">Source: {escape(article.get("url") or "")}<br>Retrieved by bpc-fetch web</p>
+<p class="source">Source: {escape(article.get("url") or "")}<br>Retrieved by Offprint</p>
 </body></html>"""
 
 
@@ -227,7 +227,7 @@ async def build_epub(article: dict) -> bytes:
 <h1>{escape(article.get("title") or "")}</h1>
 <p class="byline">{escape(_byline(article))}</p>
 {body}
-<p class="source">Source: {escape(article.get("url") or "")}<br/>Retrieved by bpc-fetch web</p>
+<p class="source">Source: {escape(article.get("url") or "")}<br/>Retrieved by Offprint</p>
 </body></html>"""
 
     book_id = f"urn:bpc-fetch:{_slug(article.get('title') or '')}"

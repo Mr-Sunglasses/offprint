@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import ClassVar
 
-DEFAULT_DB = Path.home() / ".cache" / "bpc-fetch-web" / "articles.db"
+DEFAULT_DB = Path.home() / ".cache" / "offprint" / "articles.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS articles (
@@ -60,10 +60,29 @@ CREATE TABLE IF NOT EXISTS domain_outcomes (
 
 class ArticleStore:
     def __init__(self, path: Path | str | None = None) -> None:
-        # An explicit path wins; otherwise BPC_DB_PATH, otherwise the cache dir.
-        self.path = Path(path) if path is not None else Path(os.getenv("BPC_DB_PATH", DEFAULT_DB))
+        # An explicit path wins; otherwise OFFPRINT_DB_PATH, otherwise the cache dir.
+        self.path = (
+            Path(path) if path is not None else Path(os.getenv("OFFPRINT_DB_PATH", DEFAULT_DB))
+        )
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Only the default location adopts the pre-rename library; an explicit
+        # path (tests, OFFPRINT_DB_PATH) must start clean.
+        if path is None and "OFFPRINT_DB_PATH" not in os.environ:
+            self._adopt_legacy_library()
         self._migrate()
+
+    def _adopt_legacy_library(self) -> None:
+        """One-time: keep the library from before the rename."""
+        legacy = Path.home() / ".cache" / "bpc-fetch-web" / "articles.db"
+        if self.path.exists() or not legacy.exists():
+            return
+        try:
+            import shutil
+
+            shutil.copy2(legacy, self.path)
+            print(f"[store] adopted existing library from {legacy}")
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------ #
     def _connect(self) -> sqlite3.Connection:

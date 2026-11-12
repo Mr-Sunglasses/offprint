@@ -1,6 +1,6 @@
 """Discovery parsing tests (no network)."""
 
-from bpc_web.discover import (
+from offprint.discover import (
     _days_from_since,
     _looks_like_article,
     find_feed_link,

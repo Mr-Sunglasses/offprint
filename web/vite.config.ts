@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../src/bpc_web/static',
+    outDir: '../src/offprint/static',
     emptyOutDir: true,
     sourcemap: false,
   },

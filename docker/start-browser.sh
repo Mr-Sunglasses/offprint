@@ -6,7 +6,7 @@
 # Python TCP proxy. No extra packages, no socat.
 set -eu
 
-LISTEN_PORT="${BPC_CDP_PORT:-9222}"
+LISTEN_PORT="${OFFPRINT_CDP_PORT:-9222}"
 INNER_PORT=$((LISTEN_PORT + 1))
 
 CHROME="$(ls -d /ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | head -1)"

@@ -1,7 +1,7 @@
 """Tests for the site table parser and URL helpers."""
 
-from bpc_web.fetcher import FetchError, normalise_url
-from bpc_web.vendor.sites import (
+from offprint.fetcher import FetchError, normalise_url
+from offprint.vendor.sites import (
     domain_from_url,
     get_sites_map,
     match_strategy,

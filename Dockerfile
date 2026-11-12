@@ -6,8 +6,8 @@ WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ ./
-# vite's outDir is ../src/bpc_web/static, relative to web/ — same layout as the repo
-RUN mkdir -p /app/src/bpc_web && npm run build
+# vite's outDir is ../src/offprint/static, relative to web/ — same layout as the repo
+RUN mkdir -p /app/src/offprint && npm run build
 
 # ---------- runtime ----------
 FROM python:3.13-slim AS runtime
@@ -17,7 +17,7 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    BPC_SITES_JS=/data/sites.js
+    OFFPRINT_SITES_JS=/data/sites.js
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -35,7 +35,7 @@ RUN apt-get update \
     && uv run playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=web /app/src/bpc_web/static ./src/bpc_web/static
+COPY --from=web /app/src/offprint/static ./src/offprint/static
 COPY docker/start-browser.sh /usr/local/bin/start-browser.sh
 COPY docker/cdp_proxy.py /usr/local/bin/cdp_proxy.py
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -47,4 +47,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["uv", "run", "bpc-web", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "offprint", "--host", "0.0.0.0", "--port", "8000"]

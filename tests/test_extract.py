@@ -1,6 +1,6 @@
 """Tests for HTML -> Markdown extraction."""
 
-from bpc_web.extract import extract_article, json_ld_body, score_candidate, strip_paywall_text
+from offprint.extract import extract_article, json_ld_body, score_candidate, strip_paywall_text
 
 ARTICLE_HTML = """
 <html><head>

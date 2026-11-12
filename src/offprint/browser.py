@@ -41,7 +41,7 @@ BLOCKED_RESOURCE_TYPES = {"font", "media"}
 
 # Runs in every frame before page scripts: removes the obvious automation tells.
 # (Cloudflare/DataDome score IP reputation too — this only helps the fingerprint
-# half of the problem, which is why BPC_HEADFUL exists.)
+# half of the problem, which is why OFFPRINT_HEADFUL exists.)
 STEALTH_JS = """
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
@@ -65,7 +65,7 @@ CHALLENGE_TITLES = (
     "checking your browser",
     "verifying you are human",
 )
-CHALLENGE_WAIT_MS = int(os.getenv("BPC_CHALLENGE_WAIT_MS", "14000"))
+CHALLENGE_WAIT_MS = int(os.getenv("OFFPRINT_CHALLENGE_WAIT_MS", "14000"))
 
 
 @dataclass
@@ -238,14 +238,14 @@ class BrowserPool:
             if self.started:
                 return
             self._pw = await async_playwright().start()
-            cdp_url = os.getenv("BPC_CDP_URL", "").strip()
+            cdp_url = os.getenv("OFFPRINT_CDP_URL", "").strip()
             if cdp_url:
                 # Attach to a Chromium running elsewhere (docker-compose browser
                 # service). It owns its own lifetime, so we never close it.
                 self._browser = await self._pw.chromium.connect_over_cdp(cdp_url)
                 self._owns_browser = False
                 return
-            headful = os.getenv("BPC_HEADFUL", "0") not in ("0", "false", "no")
+            headful = os.getenv("OFFPRINT_HEADFUL", "0") not in ("0", "false", "no")
             self._browser = await self._pw.chromium.launch(
                 headless=not headful,
                 args=[
