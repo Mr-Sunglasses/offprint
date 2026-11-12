@@ -11,6 +11,7 @@ The table itself comes from the Bypass Paywalls Clean extension's ``sites.js``
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
@@ -53,7 +54,10 @@ TWO_PART_TLDS = {
 
 
 def _default_sites_js() -> Path:
-    """Locate sites.js: PyInstaller bundle -> package data -> repo checkout."""
+    """Locate sites.js: explicit env -> PyInstaller bundle -> package data -> repo."""
+    override = os.getenv("BPC_SITES_JS")
+    if override:
+        return Path(override)
     bundled = getattr(sys, "_MEIPASS", None)
     if bundled:
         return Path(bundled) / "data" / "sites.js"
@@ -294,6 +298,21 @@ def parse_sites_js(path: Path | None = None) -> dict[str, SiteStrategy]:
 
 
 _SITES_CACHE: dict[str, SiteStrategy] | None = None
+
+
+def reset_cache() -> None:
+    """Drop the parsed table so the next lookup re-reads sites.js."""
+    global _SITES_CACHE
+    _SITES_CACHE = None
+
+
+def site_count_hint() -> int:
+    """Cheap domain count straight from the file, without a full parse."""
+    try:
+        text = SITES_JS_DEFAULT.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0
+    return text.count('domain: "')
 
 
 def get_sites_map(sites_js_path: Path | None = None) -> dict[str, SiteStrategy]:

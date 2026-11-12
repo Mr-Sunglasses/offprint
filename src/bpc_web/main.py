@@ -19,9 +19,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .browser import BrowserPool
+from .batch import BatchError, BatchStore
+from .browser import BrowserPool, render_pdf
+from .discover import DiscoverError, discover_articles
+from .export import build_epub, build_pdf_html, epub_filename, pdf_filename
 from .fetcher import FetchOptions, normalise_url
-from .jobs import JobStore, RateLimiter
+from .jobs import JobStore, RateLimiter, cache_key_for
+from .sites_updater import check_and_update, read_meta
 from .store import get_store
 from .vendor.sites import get_sites_map, match_strategy
 
@@ -35,10 +39,28 @@ RATE_LIMIT = int(os.getenv("BPC_RATE_LIMIT", "40"))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pool = BrowserPool(max_contexts=int(os.getenv("BPC_BROWSER_CONTEXTS", "2")))
+    jobs = JobStore(pool, max_concurrent=MAX_CONCURRENT_FETCHES)
     app.state.pool = pool
-    app.state.jobs = JobStore(pool, max_concurrent=MAX_CONCURRENT_FETCHES)
+    app.state.jobs = jobs
+    app.state.batches = BatchStore(jobs)
     app.state.limiter = RateLimiter(limit=RATE_LIMIT)
+
+    indexed = get_store().reindex_missing()
+    if indexed:
+        print(f"[store] indexed {indexed} previously stored article(s) for search")
+
+    updater = None
+    if os.getenv("BPC_SITES_AUTOUPDATE", "0") == "1":
+        import asyncio
+
+        from .sites_updater import auto_update_loop
+
+        updater = asyncio.create_task(auto_update_loop())
+
     yield
+
+    if updater is not None:
+        updater.cancel()
     await pool.stop()
 
 
@@ -63,6 +85,24 @@ app.add_middleware(
 # --------------------------------------------------------------------------- #
 # Models
 # --------------------------------------------------------------------------- #
+
+
+class BatchRequest(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=50)
+    force_browser: bool = False
+    skip_browser: bool = False
+    use_archive: bool = True
+    include_images: bool = True
+    proxy_fallback: bool = True
+
+    def to_options(self) -> FetchOptions:
+        return FetchOptions(
+            force_browser=self.force_browser,
+            skip_browser=self.skip_browser,
+            use_archive=self.use_archive,
+            include_images=self.include_images,
+            proxy_fallback=self.proxy_fallback,
+        )
 
 
 class FetchRequest(BaseModel):
@@ -99,10 +139,33 @@ def _enforce_rate_limit(request: Request) -> None:
 
 
 def _playwright_ready() -> bool:
-    cache = Path.home() / "Library" / "Caches" / "ms-playwright"
-    if not cache.exists():
-        return False
-    return any(cache.glob("chromium-*"))
+    """Is a browser available — local Chromium, or a remote CDP endpoint?"""
+    cdp = os.getenv("BPC_CDP_URL", "").strip()
+    if cdp:
+        parsed = urlparse(cdp)
+        try:
+            with socket.create_connection(
+                (parsed.hostname or "127.0.0.1", parsed.port or 9222), timeout=0.6
+            ):
+                return True
+        except OSError:
+            return False
+
+    candidates = []
+    env_path = os.getenv("PLAYWRIGHT_BROWSERS_PATH")
+    if env_path:
+        candidates.append(Path(env_path))
+    candidates += [
+        Path.home() / "Library" / "Caches" / "ms-playwright",
+        Path.home() / ".cache" / "ms-playwright",
+        Path("/ms-playwright"),
+    ]
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        if any(candidate.glob("chromium-*")) or any(candidate.glob("chromium_headless_shell-*")):
+            return True
+    return False
 
 
 def _slugify(text: str, fallback: str = "article") -> str:
@@ -135,6 +198,10 @@ async def health() -> dict:
         "sites_supported": len(sites),
         "playwright_ready": _playwright_ready(),
         "articles_stored": get_store().count(),
+        "sites_updated_at": read_meta().get("last_updated")
+        or read_meta().get("last_checked")
+        or "",
+        "sites_digest": read_meta().get("digest", ""),
         "uptime_seconds": int(time.time() - STARTED_AT),
     }
 
@@ -154,10 +221,7 @@ async def create_fetch(request: Request, body: FetchRequest) -> dict:
         include_images=body.include_images,
         proxy_fallback=body.proxy_fallback,
     )
-    cache_key = (
-        f"{url}|{int(body.force_browser)}{int(body.skip_browser)}"
-        f"{int(body.use_archive)}{int(body.include_images)}{int(body.proxy_fallback)}"
-    )
+    cache_key = cache_key_for(url, options)
     job = request.app.state.jobs.submit(url, options, cache_key)
     return {"job_id": job.id, "url": url, "status": job.status}
 
@@ -197,6 +261,86 @@ def _frontmatter(article: dict) -> str:
     lines.append("retrieved_by: bpc-fetch-web")
     lines.append("---\n")
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# Discovery: what did this site publish recently?
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/api/discover")
+async def discover(
+    request: Request,
+    site: str = Query(min_length=3, max_length=300),
+    since: str = Query("7d", max_length=20),
+    limit: int = Query(20, ge=1, le=60),
+) -> dict:
+    _enforce_rate_limit(request)
+    try:
+        return await discover_articles(site, since=since, limit=limit)
+    except DiscoverError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Discovery failed: {exc}") from exc
+
+
+# --------------------------------------------------------------------------- #
+# Batch fetching
+# --------------------------------------------------------------------------- #
+
+
+@app.post("/api/batch", status_code=202)
+async def create_batch(request: Request, body: BatchRequest) -> dict:
+    _enforce_rate_limit(request)
+    try:
+        return request.app.state.batches.submit(body.urls, body.to_options())
+    except BatchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/batch/{batch_id}")
+async def get_batch(request: Request, batch_id: str) -> dict:
+    batch = request.app.state.batches.get(batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Unknown batch id.")
+    return batch
+
+
+# --------------------------------------------------------------------------- #
+# Library: full-text search over everything fetched so far
+# --------------------------------------------------------------------------- #
+
+
+@app.get("/api/search")
+async def search_library(
+    q: str = Query(min_length=1, max_length=200),
+    limit: int = Query(20, ge=1, le=60),
+) -> dict:
+    results = get_store().search(q, limit=limit)
+    return {"query": q, "count": len(results), "results": results}
+
+
+@app.get("/api/stats")
+async def domain_stats(limit: int = Query(40, ge=1, le=200)) -> dict:
+    stats = get_store().domain_stats(limit=limit)
+    return {
+        "domains": stats,
+        "tracked": len(stats),
+        "articles_stored": get_store().count(),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Site table maintenance
+# --------------------------------------------------------------------------- #
+
+
+@app.post("/api/sites/update")
+async def update_site_table(request: Request, force: bool = False) -> dict:
+    token = os.getenv("BPC_ADMIN_TOKEN", "")
+    if token and request.headers.get("x-admin-token") != token:
+        raise HTTPException(status_code=403, detail="Admin token required.")
+    return await check_and_update(force=force)
 
 
 @app.get("/api/sites")
@@ -273,6 +417,38 @@ async def download_stored_markdown(article_id: str) -> Response:
         content=_frontmatter(article) + article["markdown"] + "\n",
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/articles/{article_id}/epub")
+async def download_epub(article_id: str) -> Response:
+    payload = get_store().get(article_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Unknown article id.")
+    article = payload["article"]
+    data = await build_epub(article)
+    return Response(
+        content=data,
+        media_type="application/epub+zip",
+        headers={"Content-Disposition": f'attachment; filename="{epub_filename(article)}"'},
+    )
+
+
+@app.get("/api/articles/{article_id}/pdf")
+async def download_pdf(request: Request, article_id: str) -> Response:
+    payload = get_store().get(article_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Unknown article id.")
+    article = payload["article"]
+    html = await build_pdf_html(article)
+    try:
+        pdf = await render_pdf(request.app.state.pool, html)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"PDF rendering unavailable: {exc}") from exc
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{pdf_filename(article)}"'},
     )
 
 

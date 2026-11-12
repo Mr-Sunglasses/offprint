@@ -2,14 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Article, FetchOptions, Health, Job, Lookup } from './types'
 import { getArticle, health as fetchHealth, lookup as fetchLookup, startFetch, waitForJob } from './api'
 import { ArticleView } from './components/ArticleView'
+import { BatchPanel } from './components/BatchPanel'
+import { DiscoverPanel } from './components/DiscoverPanel'
 import { FetchProgress } from './components/FetchProgress'
 import { Header } from './components/Header'
 import { HistoryStrip } from './components/HistoryStrip'
+import { LibraryModal } from './components/LibraryModal'
 import { SitesModal } from './components/SitesModal'
+import { StatsModal } from './components/StatsModal'
 import { UrlForm } from './components/UrlForm'
 import { Icon } from './components/Icon'
 
 type Phase = 'idle' | 'fetching' | 'done' | 'error'
+type Mode = 'link' | 'batch' | 'latest'
 type HistoryEntry = { url: string; title: string; site: string; at: number }
 
 const HISTORY_KEY = 'bpc-fetch-history'
@@ -23,6 +28,12 @@ const DEFAULT_OPTIONS: FetchOptions = {
   include_images: true,
   proxy_fallback: true,
 }
+
+const MODES: Array<{ key: Mode; label: string }> = [
+  { key: 'link', label: 'One link' },
+  { key: 'batch', label: 'Batch' },
+  { key: 'latest', label: 'Latest' },
+]
 
 function readTheme(): 'light' | 'dark' {
   const stored = localStorage.getItem(THEME_KEY)
@@ -41,6 +52,7 @@ function readHistory(): HistoryEntry[] {
 
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(readTheme)
+  const [mode, setMode] = useState<Mode>('link')
   const [url, setUrl] = useState('')
   const [options, setOptions] = useState<FetchOptions>(DEFAULT_OPTIONS)
   const [phase, setPhase] = useState<Phase>('idle')
@@ -49,8 +61,12 @@ export default function App() {
   const [lookup, setLookup] = useState<Lookup | null>(null)
   const [info, setInfo] = useState<Health | null>(null)
   const [sitesOpen, setSitesOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [statsOpen, setStatsOpen] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[]>(readHistory)
   const [elapsed, setElapsed] = useState(0)
+  const [discoverSite, setDiscoverSite] = useState('')
+  const [pendingBatch, setPendingBatch] = useState<string[]>([])
 
   const startedAt = useRef(0)
   const lookupTimer = useRef<number | undefined>(undefined)
@@ -66,14 +82,9 @@ export default function App() {
       .catch(() => setInfo(null))
   }, [])
 
-  // A shared permalink (?a=<article_id>) loads the stored article.
-  useEffect(() => {
-    const shared = new URLSearchParams(window.location.search).get('a')
-    if (!shared) return
-    let cancelled = false
-    getArticle(shared)
+  const openStored = useCallback((articleId: string) => {
+    getArticle(articleId)
       .then((stored) => {
-        if (cancelled) return
         setJob({
           id: '',
           url: stored.article.url,
@@ -86,17 +97,26 @@ export default function App() {
         })
         setUrl(stored.article.url)
         setPhase('done')
+        setMode('link')
+        const next = new URL(window.location.href)
+        next.searchParams.set('a', articleId)
+        window.history.replaceState({}, '', next)
+        window.setTimeout(() => {
+          document.querySelector('.reader')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }, 60)
       })
       .catch(() => {
-        if (!cancelled) {
-          setPhase('error')
-          setError('That shared article is no longer stored on this server.')
-        }
+        setPhase('error')
+        setError('That article is no longer stored on this server.')
       })
-    return () => {
-      cancelled = true
-    }
   }, [])
+
+  // A shared permalink (?a=<article_id>) loads the stored article.
+  useEffect(() => {
+    const shared = new URLSearchParams(window.location.search).get('a')
+    if (!shared) return
+    openStored(shared)
+  }, [openStored])
 
   const toggleTheme = useCallback(() => {
     setTheme((current) => {
@@ -146,6 +166,7 @@ export default function App() {
       const controller = new AbortController()
       abortRef.current = controller
 
+      setMode('link')
       setPhase('fetching')
       setError('')
       setJob(null)
@@ -202,6 +223,7 @@ export default function App() {
     setError('')
     setUrl('')
     setLookup(null)
+    setMode('link')
   }, [])
 
   const busy = phase === 'fetching'
@@ -220,6 +242,29 @@ export default function App() {
     />
   )
 
+  const modeTabs = (
+    <div className="mode-tabs" role="tablist" aria-label="Fetch mode">
+      {MODES.map((tab) => (
+        <button
+          key={tab.key}
+          role="tab"
+          aria-selected={mode === tab.key}
+          className={mode === tab.key ? 'is-active' : ''}
+          onClick={() => {
+            setMode(tab.key)
+            if (tab.key !== 'link') {
+              setPhase('idle')
+              setJob(null)
+              setError('')
+            }
+          }}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  )
+
   return (
     <div className="app">
       <div className="shell">
@@ -227,13 +272,15 @@ export default function App() {
           theme={theme}
           onToggleTheme={toggleTheme}
           onOpenSites={() => setSitesOpen(true)}
+          onOpenLibrary={() => setLibraryOpen(true)}
+          onOpenStats={() => setStatsOpen(true)}
           siteCount={info?.sites_supported ?? null}
           onReset={reset}
           compact={phase !== 'idle'}
         />
 
-        <main className={phase === 'idle' ? 'stage stage-idle' : 'stage'}>
-          {phase === 'idle' ? (
+        <main className={phase === 'idle' && mode === 'link' ? 'stage stage-idle' : 'stage'}>
+          {phase === 'idle' && mode === 'link' && (
             <section className="hero">
               <p className="hero-kicker">
                 <span className="kicker-rule" />
@@ -248,6 +295,7 @@ export default function App() {
                 and all.
               </p>
 
+              {modeTabs}
               {form}
 
               <ul className="how-it-works">
@@ -287,8 +335,65 @@ export default function App() {
                 </p>
               )}
             </section>
-          ) : (
+          )}
+
+          {phase === 'idle' && mode !== 'link' && (
+            <section className="hero hero-tool">
+              <div className="tool-head">
+                {modeTabs}
+                <h1 className="tool-title">
+                  {mode === 'batch' ? 'A stack of links, one pass.' : 'What did they publish today?'}
+                </h1>
+                <p className="tool-deck">
+                  {mode === 'batch'
+                    ? 'Paste up to 50 article URLs. They resolve in parallel, honouring the same cache and rate limits as a single fetch.'
+                    : 'Pick a publication and bpc-fetch reads its own RSS feed or sitemap — then you choose what to fetch.'}
+                </p>
+              </div>
+
+              {mode === 'batch' ? (
+                <BatchPanel
+                  options={options}
+                  onOpenArticle={openStored}
+                  onOpenUrl={(target) => {
+                    setUrl(target)
+                    void run(target, options)
+                  }}
+                />
+              ) : (
+                <DiscoverPanel
+                  initialSite={discoverSite}
+                  onFetchUrl={(target) => {
+                    setUrl(target)
+                    void run(target, options)
+                  }}
+                  onFetchMany={(urls) => {
+                    setPendingBatch(urls)
+                    setMode('batch')
+                  }}
+                />
+              )}
+
+              {mode === 'batch' && pendingBatch.length > 0 && (
+                <p className="notice">
+                  {pendingBatch.length} article{pendingBatch.length === 1 ? '' : 's'} queued from
+                  discovery — paste or press Fetch all to run them.
+                  <button
+                    className="link-btn"
+                    onClick={() => {
+                      setPendingBatch([])
+                    }}
+                  >
+                    dismiss
+                  </button>
+                </p>
+              )}
+            </section>
+          )}
+
+          {(phase !== 'idle' || mode === 'link') && phase !== 'idle' && (
             <section className="workspace">
+              {modeTabs}
               {form}
 
               {busy && <FetchProgress steps={job?.steps ?? []} elapsed={elapsed} />}
@@ -325,7 +430,8 @@ export default function App() {
         <footer className="foot">
           <span>
             bpc-fetch web · {info ? `v${info.version}` : 'v0.1.0'} ·{' '}
-            {(info?.sites_supported ?? 936).toLocaleString()} sites
+            {(info?.sites_supported ?? 936).toLocaleString()} sites ·{' '}
+            {(info?.articles_stored ?? 0).toLocaleString()} stored
           </span>
           <span className="foot-links">
             <a href="https://github.com/Sophomoresty/bpc-fetch" target="_blank" rel="noreferrer">
@@ -346,8 +452,24 @@ export default function App() {
         onClose={() => setSitesOpen(false)}
         onPick={(domain) => {
           setSitesOpen(false)
-          handleUrlChange(`https://www.${domain}/`)
+          setDiscoverSite(domain)
+          setMode('latest')
+          setPhase('idle')
         }}
+      />
+      <LibraryModal
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        onOpenArticle={(articleId) => {
+          setLibraryOpen(false)
+          openStored(articleId)
+        }}
+      />
+      <StatsModal
+        open={statsOpen}
+        onClose={() => setStatsOpen(false)}
+        siteCount={info?.sites_supported ?? null}
+        sitesUpdatedAt={info?.sites_updated_at ?? ''}
       />
     </div>
   )

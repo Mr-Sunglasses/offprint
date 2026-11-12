@@ -115,3 +115,67 @@ def test_markdown_download_unknown_job(client):
 
 def test_unknown_api_path_is_404(client):
     assert client.get("/api/definitely-not-a-route").status_code == 404
+
+
+def test_batch_rejects_empty_and_invalid(client):
+    assert client.post("/api/batch", json={"urls": []}).status_code == 422
+    assert client.post("/api/batch", json={"urls": ["not a url"]}).status_code == 422
+
+
+def test_batch_lifecycle(client, monkeypatch):
+    import bpc_web.jobs as jobs_module
+
+    async def fake_fetch_article(url, options=None, pool=None, progress=None):
+        if progress:
+            progress("http", "done", "HTTP 200 · 40 chars")
+        return make_result(url)
+
+    monkeypatch.setattr(jobs_module, "fetch_article", fake_fetch_article)
+
+    created = client.post(
+        "/api/batch",
+        json={"urls": ["https://example.com/one", "https://example.com/two", "bogus"]},
+    )
+    assert created.status_code == 202
+    payload = created.json()
+    assert payload["count"] == 2
+    assert len(payload["skipped"]) == 1
+
+    for _ in range(60):
+        status = client.get(f"/api/batch/{payload['id']}").json()
+        if status["status"] == "done":
+            break
+    assert status["status"] == "done"
+    assert status["done"] == 2
+    assert all(item["status"] == "done" for item in status["items"])
+    assert client.get("/api/batch/nope").status_code == 404
+
+
+def test_search_and_stats_endpoints(client, monkeypatch):
+    import bpc_web.jobs as jobs_module
+
+    async def fake_fetch_article(url, options=None, pool=None, progress=None):
+        return make_result(url)
+
+    monkeypatch.setattr(jobs_module, "fetch_article", fake_fetch_article)
+
+    created = client.post("/api/fetch", json={"url": "example.com/searchable-story"})
+    job_id = created.json()["job_id"]
+    for _ in range(60):
+        job = client.get(f"/api/fetch/{job_id}").json()
+        if job["status"] in ("done", "error"):
+            break
+    assert job["status"] == "done"
+
+    hits = client.get("/api/search", params={"q": "Stubbed"}).json()
+    assert hits["count"] >= 1
+    assert any("Stubbed" in hit["title"] for hit in hits["results"])
+
+    stats = client.get("/api/stats").json()
+    assert "domains" in stats and "articles_stored" in stats
+
+
+def test_discover_validates_site(client):
+    # unknown TLD-less junk should 404/422, not crash
+    response = client.get("/api/discover", params={"site": "not-a-real-domain-zzz"})
+    assert response.status_code in (404, 422, 502)

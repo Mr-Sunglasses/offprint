@@ -227,6 +227,7 @@ class BrowserPool:
         self._browser: Browser | None = None
         self._sem = asyncio.Semaphore(max_contexts)
         self._lock = asyncio.Lock()
+        self._owns_browser = True
 
     @property
     def started(self) -> bool:
@@ -237,6 +238,13 @@ class BrowserPool:
             if self.started:
                 return
             self._pw = await async_playwright().start()
+            cdp_url = os.getenv("BPC_CDP_URL", "").strip()
+            if cdp_url:
+                # Attach to a Chromium running elsewhere (docker-compose browser
+                # service). It owns its own lifetime, so we never close it.
+                self._browser = await self._pw.chromium.connect_over_cdp(cdp_url)
+                self._owns_browser = False
+                return
             headful = os.getenv("BPC_HEADFUL", "0") not in ("0", "false", "no")
             self._browser = await self._pw.chromium.launch(
                 headless=not headful,
@@ -246,10 +254,11 @@ class BrowserPool:
                     "--no-first-run",
                 ],
             )
+            self._owns_browser = True
 
     async def stop(self) -> None:
         async with self._lock:
-            if self._browser:
+            if self._browser and self._owns_browser:
                 try:
                     await self._browser.close()
                 except Exception:
@@ -289,6 +298,18 @@ class BrowserPool:
                     await context.close()
                 except Exception:
                     pass
+
+
+async def render_pdf(pool: BrowserPool, html: str) -> bytes:
+    """Print an HTML document to PDF with Chromium."""
+    async with pool.page() as page:
+        await page.set_content(html, wait_until="load")
+        await page.wait_for_timeout(250)
+        return await page.pdf(
+            format="A4",
+            print_background=True,
+            margin={"top": "18mm", "bottom": "18mm", "left": "16mm", "right": "16mm"},
+        )
 
 
 async def _wire_blocking(page, strategy: SiteStrategy | None) -> None:

@@ -1,0 +1,32 @@
+services:
+  app:
+    build:
+      context: .
+    image: bpc-fetch-web:local
+    ports:
+      - "8000:8000"
+    environment:
+      # talk to the browser container over CDP instead of launching Chromium
+      BPC_CDP_URL: http://browser:9222
+      BPC_SITES_AUTOUPDATE: "1"
+      BPC_SITES_JS: /data/sites.js
+      BPC_DB_PATH: /data/articles.db
+      BPC_MAX_CONCURRENT: "4"
+      BPC_BROWSER_CONTEXTS: "3"
+    volumes:
+      - bpc-data:/data
+    depends_on:
+      browser:
+        condition: service_started
+    restart: unless-stopped
+
+  browser:
+    image: bpc-fetch-web:local
+    entrypoint: ["/usr/local/bin/start-browser.sh"]
+    shm_size: "1gb"
+    environment:
+      BPC_CDP_PORT: "9222"
+    restart: unless-stopped
+
+volumes:
+  bpc-data:

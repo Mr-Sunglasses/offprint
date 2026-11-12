@@ -1,4 +1,15 @@
-import type { FetchOptions, FetchResult, Health, Job, Lookup, SitesResponse } from './types'
+import type {
+  BatchStatus,
+  DiscoverResult,
+  DomainStat,
+  FetchOptions,
+  FetchResult,
+  Health,
+  Job,
+  Lookup,
+  SearchHit,
+  SitesResponse,
+} from './types'
 
 const BASE = ''
 
@@ -79,4 +90,49 @@ export function proxiedImage(src: string, articleUrl: string) {
   if (!/^https?:\/\//i.test(src)) return src
   const params = new URLSearchParams({ url: src, ref: articleUrl })
   return `/api/image?${params.toString()}`
+}
+
+export async function startBatch(urls: string[], options: FetchOptions) {
+  return request<{ id: string; count: number; skipped: Array<{ url: string; error: string }> }>(
+    '/api/batch',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ urls, ...options }),
+    },
+  )
+}
+
+export async function getBatch(id: string) {
+  return request<BatchStatus>(`/api/batch/${id}`)
+}
+
+export async function discover(site: string, since = '7d', limit = 20) {
+  const params = new URLSearchParams({ site, since, limit: String(limit) })
+  return request<DiscoverResult>(`/api/discover?${params.toString()}`)
+}
+
+export async function searchLibrary(q: string, limit = 20) {
+  const params = new URLSearchParams({ q, limit: String(limit) })
+  return request<{ query: string; count: number; results: SearchHit[] }>(`/api/search?${params.toString()}`)
+}
+
+export async function domainStats(limit = 40) {
+  return request<{ domains: DomainStat[]; tracked: number; articles_stored: number }>(
+    `/api/stats?limit=${limit}`,
+  )
+}
+
+export async function updateSiteTable(force = false) {
+  return request<Record<string, unknown>>(`/api/sites/update?force=${force ? 'true' : 'false'}`, {
+    method: 'POST',
+  })
+}
+
+export function epubUrl(articleId: string) {
+  return `/api/articles/${articleId}/epub`
+}
+
+export function pdfUrl(articleId: string) {
+  return `/api/articles/${articleId}/pdf`
 }

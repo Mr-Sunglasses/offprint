@@ -20,6 +20,14 @@ React + Vite front end, packaged with **uv**.
 
 ![Reader view](docs/screenshots/reader-dark.png)
 
+| Batch | Discovery |
+|---|---|
+| ![Batch](docs/screenshots/batch-light.png) | ![Discover](docs/screenshots/discover-light.png) |
+
+| Library search | Domain health |
+|---|---|
+| ![Library](docs/screenshots/library-light.png) | ![Health](docs/screenshots/health-light.png) |
+
 ## Quick start
 
 ```bash
@@ -54,6 +62,16 @@ cd web && npm run dev       # UI on :5173, proxies /api to :8000
 
 ## What it does
 
+- **Batch mode** — paste up to 50 links, they resolve in parallel through the same
+  cache and rate limiter, with per-item status and one click into any result.
+- **Discovery** — point it at a publication and it reads that site's own RSS feed
+  (or sitemap) to list what it published today/this week; fetch one, or batch the lot.
+- **Library search** — every fetched article is stored in SQLite with an FTS5 index,
+  so you can full-text search things you read weeks ago.
+- **Export** — `.md`, **EPUB** (with images) and **PDF** (rendered by Chromium,
+  images downscaled) straight from the reader.
+- **Health view** — which stage actually lands each publisher, from this server's
+  own history, plus a button to refresh the site table from upstream.
 - **936 supported sites** (the Bypass Paywalls Clean table: NYT, WSJ, FT,
   The Economist, Le Monde, FAZ, Bloomberg, Wired, ...) — each gets the header
   trick that actually works for it: Googlebot UA, custom UA, `Referer` spoofing,
@@ -82,6 +100,14 @@ cd web && npm run dev       # UI on :5173, proxies /api to :8000
 | `POST` | `/api/fetch` | `{url, force_browser?, skip_browser?, use_archive?, include_images?}` → `{job_id}` |
 | `GET` | `/api/fetch/{job_id}` | job status, step trace, article |
 | `GET` | `/api/fetch/{job_id}/markdown` | `.md` download with front matter |
+| `POST` | `/api/batch` | `{urls: [...]}` → `{id}` (up to 50, parallel) |
+| `GET` | `/api/batch/{id}` | per-item status for a batch |
+| `GET` | `/api/discover?site=&since=7d&limit=` | recent articles via RSS/sitemap |
+| `GET` | `/api/search?q=` | full-text search over stored articles |
+| `GET` | `/api/stats` | per-domain stage outcomes |
+| `GET` | `/api/articles/{id}/epub` | EPUB export |
+| `GET` | `/api/articles/{id}/pdf` | PDF export (Chromium) |
+| `POST` | `/api/sites/update?force=` | refresh the site table from upstream |
 | `GET` | `/api/sites?q=&limit=&offset=` | search the supported-site table |
 | `GET` | `/api/lookup?url=` | does this URL have a strategy? which? |
 | `GET` | `/api/image?url=&ref=` | image proxy (Referer-safe) |
@@ -113,6 +139,24 @@ curl -s -X POST localhost:8000/api/fetch \
 | `BPC_HEADFUL` | `0` | `1` runs Chromium with a window (local use, passes more challenges) |
 | `BPC_CHALLENGE_WAIT_MS` | `14000` | How long to wait for a JS interstitial to clear |
 | `BPC_DB_PATH` | `~/.cache/bpc-fetch-web/articles.db` | Article store location |
+| `BPC_CDP_URL` | – | Attach to a remote Chromium (`http://browser:9222`) instead of launching one |
+| `BPC_SITES_AUTOUPDATE` | `0` | `1` checks upstream for a new site table at boot + daily |
+| `BPC_SITES_UPDATE_URL` | bpc-fetch raw GitHub | Where to pull the table from |
+| `BPC_SITES_JS` | bundled copy | Writable path for the site table (set in Docker) |
+| `BPC_ADMIN_TOKEN` | – | If set, `/api/sites/update` requires `X-Admin-Token` |
+
+## Docker
+
+The app and the browser can run as separate containers: the app attaches to
+Chromium over CDP, so a browser crash or restart doesn't take the API with it.
+
+```bash
+docker compose up --build      # http://localhost:8000
+```
+
+- `app` — FastAPI + built UI, articles and the site table on the `bpc-data` volume
+- `browser` — headless Chromium exposing CDP on :9222 (`BPC_CDP_URL` points at it)
+- Chromium is installed in the image either way, so `docker run` alone works too.
 
 ## Layout
 
@@ -123,7 +167,11 @@ src/bpc_web/
   extract.py   HTML → Markdown (trafilatura, JSON-LD metadata, cleanup)
   browser.py   Playwright pool, route blocking, overlay removal, DOM read
   jobs.py      in-memory job store, TTL cache, rate limiter
+  batch.py     batch store: many URLs, one id, per-item status
+  discover.py  RSS/Atom + sitemap discovery, with a known-feed table
+  export.py    EPUB builder and PDF print document
   proxy.py     reader-proxy stage (Jina envelope -> Markdown, prose window)
+  sites_updater.py  pull the site table from upstream, validate, swap, reset cache
   store.py     SQLite article store: permalinks, cross-restart cache
   vendor/      header strategies + sites.js parser (from bpc-fetch)
   data/sites.js  the 936-site table

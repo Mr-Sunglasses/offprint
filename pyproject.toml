@@ -19,6 +19,8 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.2",
     "playwright>=1.40",
+    "markdown>=3.7",
+    "pillow>=11.0",
     "pydantic>=2.7",
 ]
 

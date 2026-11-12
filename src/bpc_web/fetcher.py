@@ -129,6 +129,7 @@ class FetchResult:
     confidence: str = "high"
 
     paywalled_preview: bool = False
+    winner_stage: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -140,6 +141,7 @@ class FetchResult:
             "elapsed_ms": self.elapsed_ms,
             "confidence": self.confidence,
             "paywalled_preview": self.paywalled_preview,
+            "winner_stage": self.winner_stage,
         }
 
 
@@ -299,100 +301,105 @@ async def fetch_article(
     async with httpx.AsyncClient(
         follow_redirects=True, timeout=TIMEOUT, headers={"Accept-Language": "en-US,en;q=0.9"}
     ) as client:
-        # --- 1. direct request, site-specific headers ---------------------- #
-        await emit("http", "running", "Direct request with site-specific headers")
-        t0 = time.perf_counter()
-        try:
-            resp = await client.get(url, headers=build_headers(strategy))
-        except Exception as exc:
-            attempts.append(
-                Attempt(
-                    "http",
-                    "Direct request",
-                    False,
-                    0,
-                    0,
-                    False,
-                    _ms(t0),
-                    f"{type(exc).__name__}: {exc}"[:160],
+        if not options.force_browser:
+            # --- 1. direct request, site-specific headers ---------------------- #
+            await emit("http", "running", "Direct request with site-specific headers")
+            t0 = time.perf_counter()
+            try:
+                resp = await client.get(url, headers=build_headers(strategy))
+            except Exception as exc:
+                attempts.append(
+                    Attempt(
+                        "http",
+                        "Direct request",
+                        False,
+                        0,
+                        0,
+                        False,
+                        _ms(t0),
+                        f"{type(exc).__name__}: {exc}"[:160],
+                    )
                 )
-            )
-            await emit("http", "failed", "Direct request failed")
-        else:
-            paywalled = looks_paywalled(resp.text)
-            blocked = looks_blocked(resp.text[:4000])
-            art = consider(resp.text)
-            attempts.append(
-                Attempt(
-                    "http",
-                    "Direct request",
-                    True,
-                    resp.status_code,
-                    len(art["text"]),
-                    paywalled,
-                    _ms(t0),
-                    "bot guard answered"
-                    if blocked
-                    else ("paywall markers present" if paywalled else ""),
-                )
-            )
-            await emit("http", "done", f"HTTP {resp.status_code} · {len(art['text']):,} chars")
-            hard_wall = _is_hard_wall(resp.status_code, resp.text)
-            if blocked:
-                pass  # a bot guard answered: this is not the article
-            elif paywalled:
-                take(art, "Direct request (partial)")  # keep it, but keep escalating
+                await emit("http", "failed", "Direct request failed")
             else:
-                take(art, "Direct request")
-                if best is not None and _rank(best) >= GOOD_ENOUGH_CHARS:
-                    return _finish(best, best_stage, strategy_info, attempts, started)
+                paywalled = looks_paywalled(resp.text)
+                blocked = looks_blocked(resp.text[:4000])
+                art = consider(resp.text)
+                attempts.append(
+                    Attempt(
+                        "http",
+                        "Direct request",
+                        True,
+                        resp.status_code,
+                        len(art["text"]),
+                        paywalled,
+                        _ms(t0),
+                        "bot guard answered"
+                        if blocked
+                        else ("paywall markers present" if paywalled else ""),
+                    )
+                )
+                await emit("http", "done", f"HTTP {resp.status_code} · {len(art['text']):,} chars")
+                hard_wall = _is_hard_wall(resp.status_code, resp.text)
+                if blocked:
+                    pass  # a bot guard answered: this is not the article
+                elif paywalled:
+                    take(art, "Direct request (partial)")  # keep it, but keep escalating
+                else:
+                    take(art, "Direct request")
+                    if best is not None and _rank(best) >= GOOD_ENOUGH_CHARS:
+                        return _finish(best, best_stage, strategy_info, attempts, started)
 
-        # --- 2. crawler User-Agent ---------------------------------------- #
-        await emit("bot", "running", "Retrying as a search-engine crawler")
-        t0 = time.perf_counter()
-        try:
-            resp = await client.get(url, headers=googlebot_headers())
-            paywalled = looks_paywalled(resp.text)
-            blocked = looks_blocked(resp.text[:4000])
-            art = consider(resp.text)
-            attempts.append(
-                Attempt(
-                    "bot",
-                    "Crawler User-Agent",
-                    True,
-                    resp.status_code,
-                    len(art["text"]),
-                    paywalled,
-                    _ms(t0),
-                    "bot guard answered"
-                    if blocked
-                    else ("paywall markers present" if paywalled else ""),
+            # --- 2. crawler User-Agent ---------------------------------------- #
+            await emit("bot", "running", "Retrying as a search-engine crawler")
+            t0 = time.perf_counter()
+            try:
+                resp = await client.get(url, headers=googlebot_headers())
+                paywalled = looks_paywalled(resp.text)
+                blocked = looks_blocked(resp.text[:4000])
+                art = consider(resp.text)
+                attempts.append(
+                    Attempt(
+                        "bot",
+                        "Crawler User-Agent",
+                        True,
+                        resp.status_code,
+                        len(art["text"]),
+                        paywalled,
+                        _ms(t0),
+                        "bot guard answered"
+                        if blocked
+                        else ("paywall markers present" if paywalled else ""),
+                    )
                 )
-            )
-            await emit("bot", "done", f"HTTP {resp.status_code} · {len(art['text']):,} chars")
-            hard_wall = hard_wall or _is_hard_wall(resp.status_code, resp.text)
-            if blocked:
-                pass
-            elif paywalled:
-                take(art, "Crawler User-Agent (partial)")
-            else:
-                take(art, "Crawler User-Agent")
-                if best is not None and _rank(best) >= GOOD_ENOUGH_CHARS:
-                    return _finish(best, best_stage, strategy_info, attempts, started)
-        except Exception as exc:
-            attempts.append(
-                Attempt(
-                    "bot",
-                    "Crawler User-Agent",
-                    False,
-                    0,
-                    0,
-                    False,
-                    _ms(t0),
-                    f"{type(exc).__name__}: {exc}"[:160],
+                await emit("bot", "done", f"HTTP {resp.status_code} · {len(art['text']):,} chars")
+                hard_wall = hard_wall or _is_hard_wall(resp.status_code, resp.text)
+                if blocked:
+                    pass
+                elif paywalled:
+                    take(art, "Crawler User-Agent (partial)")
+                else:
+                    take(art, "Crawler User-Agent")
+                    if best is not None and _rank(best) >= GOOD_ENOUGH_CHARS:
+                        return _finish(best, best_stage, strategy_info, attempts, started)
+            except Exception as exc:
+                attempts.append(
+                    Attempt(
+                        "bot",
+                        "Crawler User-Agent",
+                        False,
+                        0,
+                        0,
+                        False,
+                        _ms(t0),
+                        f"{type(exc).__name__}: {exc}"[:160],
+                    )
                 )
-            )
-            await emit("bot", "failed", "Crawler retry failed")
+                await emit("bot", "failed", "Crawler retry failed")
+
+        else:
+            await emit("http", "skipped", "Skipped: browser was forced")
+            await emit("bot", "skipped", "Skipped: browser was forced")
 
         # A Cloudflare/DataDome wall won't fall to a local browser: the wall is
         # scoring our IP, so try the proxy first and save 20 seconds.
@@ -531,6 +538,7 @@ def _finish(article, via, strategy_info, attempts, started) -> FetchResult:
     )
     if preview:
         confidence = "low"
+    winner_stage = next((a.stage for a in attempts if a.label == via), "")
     return FetchResult(
         article=article,
         via=via,
@@ -540,6 +548,7 @@ def _finish(article, via, strategy_info, attempts, started) -> FetchResult:
         elapsed_ms=_ms(started),
         confidence=confidence,
         paywalled_preview=preview,
+        winner_stage=winner_stage,
     )
 
 

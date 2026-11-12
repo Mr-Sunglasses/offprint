@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FetchResult } from '../types'
-import { articleMarkdownUrl, markdownUrl } from '../api'
+import { articleMarkdownUrl, epubUrl, markdownUrl, pdfUrl } from '../api'
 import { hostOf } from '../lib/format'
 import { copyText, renderMarkdown } from '../lib/markdown'
 import { Icon } from './Icon'
@@ -124,6 +124,18 @@ export function ArticleView({ result, jobId, onNew }: Props) {
               <Icon name="download" size={15} />
               Download .md
             </a>
+          )}
+          {result.article_id && (
+            <>
+              <a className="tool-btn" href={epubUrl(result.article_id)} download>
+                <Icon name="book" size={15} />
+                EPUB
+              </a>
+              <a className="tool-btn" href={pdfUrl(result.article_id)} download>
+                <Icon name="download" size={15} />
+                PDF
+              </a>
+            </>
           )}
           <a className="tool-btn" href={article.url} target="_blank" rel="noreferrer">
             <Icon name="external" size={15} />

@@ -1,0 +1,10 @@
+.venv
+web/node_modules
+web/dist
+src/bpc_web/static
+.git
+.pytest_cache
+.ruff_cache
+docs
+__pycache__
+*.pyc

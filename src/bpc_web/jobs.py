@@ -16,6 +16,16 @@ MAX_JOBS_KEPT = 300
 CACHE_TTL_SECONDS = 900
 
 
+def cache_key_for(url: str, options: FetchOptions) -> str:
+    """Stable key for the store/cache: same URL + same options = same answer."""
+    flags = (
+        f"{int(options.force_browser)}{int(options.skip_browser)}"
+        f"{int(options.use_archive)}{int(options.include_images)}"
+        f"{int(options.proxy_fallback)}"
+    )
+    return f"{url}|{flags}"
+
+
 @dataclass
 class Job:
     id: str
@@ -112,6 +122,7 @@ class JobStore:
 
             payload = result.to_dict()
             payload["article_id"] = store.save(payload, options_key=cache_key)
+            store.record_outcomes(payload)
             self._cache[cache_key] = (time.time(), payload)
             job.result = payload
             job.status = "done"
