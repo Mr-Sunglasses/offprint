@@ -25,3 +25,7 @@ web/.vite/
 # local experiments
 *.log
 articles/
+
+# site table backup created by the updater
+src/bpc_web/data/*.bak
+src/bpc_web/data/sites_meta.json
