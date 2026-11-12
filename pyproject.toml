@@ -24,6 +24,10 @@ dependencies = [
     "pydantic>=2.7",
 ]
 
+[project.urls]
+Repository = "https://github.com/Mr-Sunglasses/offprint"
+Issues = "https://github.com/Mr-Sunglasses/offprint/issues"
+
 [project.scripts]
 offprint = "offprint.__main__:main"
 

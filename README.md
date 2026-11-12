@@ -35,7 +35,7 @@ React + Vite reader, packaged with **uv**.
 ## Quick start
 
 ```bash
-git clone <this repo> && cd offprint
+git clone git@github.com:Mr-Sunglasses/offprint.git && cd offprint
 
 make install        # uv sync + Playwright Chromium + npm install
 make serve          # builds the UI, serves on http://127.0.0.1:8000
